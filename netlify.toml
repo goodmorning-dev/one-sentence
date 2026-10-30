@@ -1,0 +1,8 @@
+# Netlify detects Next.js and runs the API routes (/api/quotes, /api/polymarket/sign) as functions.
+# Set the variables from .env.example in Site configuration > Environment variables, not here.
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "22"
