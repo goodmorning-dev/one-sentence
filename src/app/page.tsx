@@ -1,103 +1,124 @@
-import Image from "next/image";
+'use client'
+
+import { useEffect, useState } from 'react'
+import { finalize } from '@/lib/compare'
+import { executors } from '@/lib/exec'
+import { refineAll } from '@/lib/exec/types'
+import { useBelief } from '@/lib/useBelief'
+import { usePositions } from '@/lib/usePositions'
+import { Logo, TAGLINE } from './components/Logo'
+import { MyBets } from './components/MyBets'
+import { Quotes, type QuotesData } from './components/Quotes'
+import { Sentence } from './components/Sentence'
+import { WalletButton } from './components/WalletButton'
+
+type Tab = 'bet' | 'bets'
+
+// The tab lives in the URL hash so links like "See it in My bets" and the back button work.
+function useTab(): Tab {
+  const [tab, setTab] = useState<Tab>('bet')
+  useEffect(() => {
+    const read = () => setTab(location.hash === '#bets' ? 'bets' : 'bet')
+    read()
+    addEventListener('hashchange', read)
+    return () => removeEventListener('hashchange', read)
+  }, [])
+  return tab
+}
 
 export default function Home() {
-  return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const tab = useTab()
+  const belief = useBelief()
+  const bets = usePositions()
+  const [data, setData] = useState<QuotesData | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [failed, setFailed] = useState(false)
+  const [updatedAt, setUpdatedAt] = useState<number | null>(null)
+  const [attempt, setAttempt] = useState(0)
+  const { asset, level, date, stake, ready } = belief
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  const incomplete = ready && (!(level > 0) || !(stake > 0) || !date)
+
+  useEffect(() => {
+    if (!ready || incomplete) return setLoading(false)
+    // Mark quotes stale the moment the sentence changes, so nobody can bet on the previous numbers.
+    setLoading(true)
+    const ctrl = new AbortController()
+    const t = setTimeout(async () => {
+      try {
+        const r = await fetch(`/api/quotes?${new URLSearchParams({ asset, level: String(level), date, stake: String(stake) })}`, { signal: ctrl.signal })
+        if (!r.ok) throw new Error(String(r.status))
+        const body: QuotesData = await r.json()
+        const results = await refineAll(body.results, executors)
+        if (ctrl.signal.aborted) return
+        setData(finalize(results))
+        setFailed(false)
+        setUpdatedAt(Date.now())
+      } catch (e) {
+        if ((e as Error).name !== 'AbortError') setFailed(true)
+      } finally {
+        if (!ctrl.signal.aborted) setLoading(false)
+      }
+    }, 400)
+    return () => { clearTimeout(t); ctrl.abort() }
+  }, [asset, level, date, stake, ready, incomplete, attempt])
+
+  const open = bets.positions?.filter((p) => p.status === 'live' || p.status === 'claimable').length ?? 0
+
+  return (
+    <div className="min-h-dvh">
+      <header className="sticky top-0 z-10 border-b border-chip bg-bg/90 backdrop-blur">
+        <div className="mx-auto flex max-w-[1120px] flex-wrap items-center justify-between gap-x-6 gap-y-3 px-4 pt-3 sm:min-h-[68px] sm:flex-nowrap sm:px-8 sm:pt-0">
+          <div className="flex items-center gap-3.5">
+            <Logo blink={updatedAt ?? 0} />
+            <span aria-hidden className="hidden h-[18px] w-px bg-line lg:block" />
+            <span className="hidden text-sm text-muted lg:inline">{TAGLINE}</span>
+          </div>
+          <nav aria-label="Sections" className="order-3 -mx-4 grid w-[calc(100%+2rem)] grid-cols-2 sm:order-none sm:mx-0 sm:flex sm:w-auto sm:rounded-full sm:border sm:border-soft-line sm:bg-surface sm:p-1">
+            <TabLink href="#" active={tab === 'bet'}>New bet</TabLink>
+            <TabLink href="#bets" active={tab === 'bets'}>
+              My bets
+              {open > 0 && <span className={`rounded-full px-[7px] py-px text-xs text-ink-2 ${tab === 'bets' ? 'bg-chip sm:bg-bg' : 'bg-chip'}`}>{open}</span>}
+            </TabLink>
+          </nav>
+          <WalletButton />
         </div>
+      </header>
+
+      <main className="mx-auto max-w-[1120px] px-4 pb-12 pt-8 sm:px-8 sm:pb-20 sm:pt-16">
+        {tab === 'bet' ? (
+          <div className="flex flex-col gap-8 sm:gap-12">
+            {ready ? <Sentence value={belief} onChange={belief.set} /> : <div className="shimmer h-48 rounded-[20px] bg-surface" />}
+            <Quotes
+              data={data}
+              incomplete={incomplete}
+              loading={loading}
+              failed={failed}
+              updatedAt={updatedAt}
+              stake={stake}
+              onRetry={() => setAttempt((n) => n + 1)}
+              onDate={(d) => belief.set({ date: d })}
+              onTraded={bets.refresh}
+            />
+          </div>
+        ) : (
+          <MyBets {...bets} />
+        )}
       </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
     </div>
-  );
+  )
+}
+
+function TabLink({ href, active, children }: { href: string; active: boolean; children: React.ReactNode }) {
+  return (
+    <a
+      href={href}
+      aria-current={active ? 'page' : undefined}
+      className={`flex min-h-11 items-center justify-center gap-1.5 whitespace-nowrap border-b-2 text-[15px] font-medium transition sm:min-h-10 sm:rounded-full sm:border-b-0 sm:px-5 ${
+        active ? 'border-win text-ink sm:bg-track' : 'border-transparent text-muted hover:text-ink'
+      }`}
+    >
+      {children}
+    </a>
+  )
 }

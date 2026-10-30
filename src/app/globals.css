@@ -1,26 +1,123 @@
 @import "tailwindcss";
 
+/* One sentence design system. Dark is the only theme for now; values from the design canvas. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg: #0f1012;
+  --surface: #17181b;
+  --raised: #1f2024;
+  --chip: #23242a;
+  --soft-line: #26272c;
+  --line: #2e3036;
+  --strong-line: #3a3c43;
+  --track: #2a2b30;
+  --text: #f3f2ed;
+  --text-2: #c9c8c0;
+  --muted: #a9a8a0;
+  --faint: #8a8981;
+  --live: #8fb8ff;
+  --live-ink: #b6d0ff;
+  --win: #c8f169;
+  --win-hover: #e2faa8;
+  --lose: #ff9b7a;
+  --lose-ink: #ffc2ad;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-chip: var(--chip);
+  --color-soft-line: var(--soft-line);
+  --color-line: var(--line);
+  --color-strong-line: var(--strong-line);
+  --color-track: var(--track);
+  --color-ink: var(--text);
+  --color-ink-2: var(--text-2);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-live: var(--live);
+  --color-live-ink: var(--live-ink);
+  --color-win: var(--win);
+  --color-win-hover: var(--win-hover);
+  --color-lose: var(--lose);
+  --color-lose-ink: var(--lose-ink);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+:focus-visible {
+  outline: 2px solid var(--win);
+  outline-offset: 2px;
+}
+
+button:not(:disabled) {
+  cursor: pointer;
+}
+
+/* Number chips read as words in the sentence, not as spin boxes. */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+select option {
+  background: var(--surface);
+  color: var(--text);
+}
+
+summary {
+  list-style: none;
+}
+summary::-webkit-details-marker {
+  display: none;
+}
+
+/* A changed figure fades down 4px and the new one rises in; cards keep their height. */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+.rise {
+  display: inline-block;
+  animation: rise 180ms ease-out;
+}
+
+@keyframes shimmer {
+  50% {
+    opacity: 0.55;
+  }
+}
+.shimmer {
+  animation: shimmer 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Logo caret: hard on/off like a text cursor, 4 blinks then solid. Off under reduced motion (rule above). */
+@keyframes caret {
+  50% {
+    opacity: 0;
+  }
+}
+.caret {
+  animation: caret 1.06s steps(1, end) 4;
 }
