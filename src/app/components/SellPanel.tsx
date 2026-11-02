@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { executors } from '@/lib/exec'
 import { sessionFor } from '@/lib/exec/sessions'
 import type { Position, SellQuote, TradeResult } from '@/lib/exec/types'
-import { signedUsd, usd } from '@/lib/format'
+import { errorChain, signedUsd, usd } from '@/lib/format'
 import { useWallet } from '@/lib/wallet'
 import { VENUE_NAMES } from './Quotes'
 import { Spinner } from './TradePanel'
@@ -12,10 +12,12 @@ import { Spinner } from './TradePanel'
 export const canSell = (p: Position) => p.status === 'live' && !!executors[p.venue]?.sellQuote
 
 function message(e: unknown) {
-  const m = e instanceof Error ? e.message : String(e)
+  const chain = errorChain(e)
+  const m = chain.join(' ')
   if (/user (rejected|denied)|rejected the request|denied transaction/i.test(m)) return 'Your wallet turned it down. Nothing was sold.'
   if (/failed to fetch|network|ERR_CERT/i.test(m)) return 'We couldn’t reach the venue. It may be blocked on this network. Nothing was sold.'
-  return m
+  // The innermost error is the real one; the outer ones only say which step failed.
+  return chain.length > 1 ? `${chain[chain.length - 1]} (${chain[0]})` : chain[0] ?? 'Something went wrong'
 }
 
 // Sell a live bet before it's decided: price it against the live bids, show exactly what comes back, confirm.

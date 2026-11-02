@@ -28,3 +28,16 @@ export function shortTitle(t: string) {
   const m = t.match(/price of (\w+) be above \$([\d,.]+) on (.+?)\??$/i)
   return m ? `${SYMBOLS[m[1]] ?? m[1]} above $${m[2]} on ${m[3]}` : t
 }
+
+// SDKs wrap wallet errors ("Failed to sign the typed data") and keep the real one in `cause`. Collect the chain,
+// innermost last, preferring viem's one-line `shortMessage`, so the UI can show what actually went wrong.
+export function errorChain(e: unknown): string[] {
+  const out: string[] = []
+  for (let cur: unknown = e, depth = 0; cur && depth < 6; depth++) {
+    const err = cur as { shortMessage?: string; message?: string; cause?: unknown }
+    const m = err.shortMessage ?? err.message ?? String(cur)
+    if (m && !out.includes(m)) out.push(m)
+    cur = err.cause
+  }
+  return out
+}

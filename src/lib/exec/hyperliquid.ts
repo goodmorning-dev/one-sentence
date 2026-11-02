@@ -60,7 +60,14 @@ async function open(wallet: WalletClient): Promise<VenueSession> {
     }
   }
 
+  // Wallets only sign typed data for the chain they're on, and this one may have moved since the session
+  // opened (another venue's card, a deposit). Every user-signed action goes through here first.
+  async function onArbitrum() {
+    if ((await wallet.getChainId()) !== arbitrum.id) await wallet.switchChain({ id: arbitrum.id })
+  }
+
   async function approveAgent() {
+    await onArbitrum()
     const key = generatePrivateKey()
     await master.approveAgent({ agentAddress: privateKeyToAccount(key).address, agentName: AGENT_NAME })
     localStorage.setItem(storageKey(user), key)
@@ -69,6 +76,7 @@ async function open(wallet: WalletClient): Promise<VenueSession> {
 
   async function approveBuilder() {
     if (!BUILDER) throw new Error('Hyperliquid builder address is not configured')
+    await onArbitrum()
     await master.approveBuilderFee({ builder: BUILDER, maxFeeRate: `${FEE_PERCENT}%` })
   }
 
@@ -156,6 +164,7 @@ async function open(wallet: WalletClient): Promise<VenueSession> {
       } else if (id === 'move') {
         const s = await state()
         const amount = Math.min(shortfall(q, s.spotFree), s.perpsFree)
+        await onArbitrum()
         await master.usdClassTransfer({ amount: amount.toFixed(2), toPerp: false })
       }
     },

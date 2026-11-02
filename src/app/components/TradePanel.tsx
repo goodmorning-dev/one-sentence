@@ -4,17 +4,19 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { executors } from '@/lib/exec'
 import { sessionFor } from '@/lib/exec/sessions'
 import type { Funding, FundingSource, FundingState, SetupStep, TradeResult, VenueAccount, VenueSession } from '@/lib/exec/types'
-import { usd } from '@/lib/format'
+import { errorChain, usd } from '@/lib/format'
 import type { Quote } from '@/lib/venues/types'
 import { useWallet } from '@/lib/wallet'
 
 type Run = (label: string, fn: () => Promise<void>) => Promise<boolean>
 
 function message(e: unknown) {
-  const m = e instanceof Error ? e.message : String(e)
+  const chain = errorChain(e)
+  const m = chain.join(' ')
   if (/user (rejected|denied)|rejected the request|denied transaction/i.test(m)) return 'Your wallet turned it down, so nothing moved.'
   if (/failed to fetch|network|ERR_CERT/i.test(m)) return 'We couldn’t reach the venue. It may be blocked on this network. Nothing was placed.'
-  return m
+  // The innermost error is the real one; the outer ones only say which step failed.
+  return chain.length > 1 ? `${chain[chain.length - 1]} (${chain[0]})` : chain[0] ?? 'Something went wrong'
 }
 
 const primaryBtn =
