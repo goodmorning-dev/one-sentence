@@ -332,7 +332,10 @@ function FundingForm({ venueName, funding, suggested, busy, run, onArrived }: {
     return (
       <div className={box}>
         <h4 className="text-lg font-semibold">Add money to {venueName}</h4>
-        <p className="text-sm leading-normal text-muted">This wallet has no USDC on Polygon, Arbitrum, Base, Optimism or Ethereum. Add some, then come back.</p>
+        <p className="text-sm leading-normal text-muted">
+          This wallet has no USDC on {[...new Set(sources.map((s) => s.chainName))].join(', ').replace(/, ([^,]*)$/, ' or $1')}.
+          Add some there, then come back.
+        </p>
       </div>
     )
   }

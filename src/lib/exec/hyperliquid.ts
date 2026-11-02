@@ -130,8 +130,19 @@ async function open(wallet: WalletClient): Promise<VenueSession> {
       const s = await state()
       const need = shortfall(q, s.spotFree)
       const canMove = !s.unified && need > 0 && s.perpsFree > 0
+      // Hyperliquid only knows an address after its first deposit and refuses every signed action until then
+      // ("Must deposit before performing actions"), so a new account adds money before anything else.
+      const fresh = s.total <= 0
+      const funds: SetupStep = {
+        id: 'funds',
+        label: fresh ? 'Add money to open your account' : 'Add money',
+        detail: s.spotFree > 0 ? `${usd(s.spotFree)} available` : 'USDC from Arbitrum, arrives in under a minute',
+        done: !fresh && need === 0 && s.spotFree > 0,
+        runnable: false,
+      }
       const steps: SetupStep[] = [
-        { id: 'wallet', label: 'Hyperliquid account', detail: user, done: true, runnable: false },
+        { id: 'wallet', label: 'Hyperliquid account', detail: fresh ? 'Opens with your first deposit' : user, done: true, runnable: false },
+        ...(fresh ? [funds] : []),
         {
           id: 'agent',
           label: 'Allow betting from here',
@@ -158,13 +169,7 @@ async function open(wallet: WalletClient): Promise<VenueSession> {
               prompt: `It’s asking you to move ${usd(Math.min(need, s.perpsFree))} from your Hyperliquid perps balance to your spot balance. It stays in your account.`,
             }]
           : []),
-        {
-          id: 'funds',
-          label: 'Add money',
-          detail: s.spotFree > 0 ? `${usd(s.spotFree)} available` : 'USDC from Arbitrum, arrives in under a minute',
-          done: need === 0 && s.spotFree > 0,
-          runnable: false,
-        },
+        ...(fresh ? [] : [funds]),
       ]
       return { address: user, balance: s.spotFree, steps, link: 'https://app.hyperliquid.xyz/portfolio' }
     },
