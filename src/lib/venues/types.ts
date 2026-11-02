@@ -56,6 +56,8 @@ export interface Unavailable {
   available: false
   reason: string
   link?: string
+  // A nearby sentence this venue can actually take, offered as a one-click "Try" in the UI.
+  suggest?: { level: number; date: string }
 }
 
 export type VenueResult = Quote | Unavailable

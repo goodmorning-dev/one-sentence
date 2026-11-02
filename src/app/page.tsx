@@ -97,7 +97,7 @@ export default function Home() {
               updatedAt={updatedAt}
               stake={stake}
               onRetry={() => setAttempt((n) => n + 1)}
-              onDate={(d) => belief.set({ date: d })}
+              onTry={(patch) => belief.set(patch)}
               onTraded={bets.refresh}
             />
           </div>

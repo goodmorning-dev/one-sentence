@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { executors } from '@/lib/exec'
-import { chanceWords, usd, when } from '@/lib/format'
+import { chanceWords, day, usd, when } from '@/lib/format'
 import type { Quote, Unavailable, VenueId, VenueResult } from '@/lib/venues/types'
 import { quickDates } from './Sentence'
 import { TradePanel } from './TradePanel'
@@ -41,10 +41,10 @@ export function Quotes(props: {
   updatedAt: number | null
   stake: number
   onRetry: () => void
-  onDate: (date: string) => void
+  onTry: (patch: { level?: number; date?: string }) => void
   onTraded: () => void
 }) {
-  const { data, incomplete, loading, failed, updatedAt, onRetry, onDate, onTraded } = props
+  const { data, incomplete, loading, failed, updatedAt, onRetry, onTry, onTraded } = props
 
   if (incomplete) {
     return (
@@ -88,16 +88,19 @@ export function Quotes(props: {
         <p className="text-sm leading-normal text-muted">Markets this far out usually open a day or two before. Try a closer date.</p>
         <div className="flex flex-wrap gap-2">
           {quickDates().slice(0, 2).map((q) => (
-            <button key={q.label} onClick={() => onDate(q.date)} className="min-h-11 rounded-full border border-strong-line px-4 text-sm text-ink hover:bg-raised">
+            <button key={q.label} onClick={() => onTry({ date: q.date })} className="min-h-11 rounded-full border border-strong-line px-4 text-sm text-ink hover:bg-raised">
               Try {q.label.toLowerCase()}
             </button>
           ))}
         </div>
         <ul className="mt-1 flex flex-col text-[13px] text-faint">
           {none.map((r) => (
-            <li key={r.venue} className="flex min-h-9 items-center justify-between gap-4 border-t border-chip">
+            <li key={r.venue} className="flex min-h-9 flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-chip py-1.5">
               <span className="text-ink-2">{VENUE_NAMES[r.venue]}</span>
-              <span className="text-right">{r.reason}</span>
+              <span className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 text-right">
+                {r.reason}
+                {r.suggest && <TryButton suggest={r.suggest} onTry={onTry} />}
+              </span>
             </li>
           ))}
         </ul>
@@ -130,13 +133,28 @@ export function Quotes(props: {
                 <VenueMark venue={r.venue} muted />
                 <span className="text-[15px] text-ink-2">{VENUE_NAMES[r.venue]}</span>
               </span>
-              <span className="text-right text-[13px] text-faint">{r.reason}</span>
+              <span className="flex flex-col items-end gap-1 text-right text-[13px] text-faint">
+                {r.reason}
+                {r.suggest && <TryButton suggest={r.suggest} onTry={onTry} />}
+              </span>
             </div>
           ))}
           <LiveStamp at={updatedAt} loading={loading} className="hidden px-2 sm:flex" />
         </div>
       </div>
     </section>
+  )
+}
+
+// A venue's own suggestion of a sentence it can take, one click to apply.
+function TryButton({ suggest, onTry }: { suggest: { level: number; date: string }; onTry: (patch: { level: number; date: string }) => void }) {
+  return (
+    <button
+      onClick={() => onTry(suggest)}
+      className="inline-flex min-h-9 items-center gap-1 rounded-full border border-win/40 px-3 text-[13px] font-medium text-win transition hover:bg-win/10"
+    >
+      Try {usd(suggest.level, 0)} on {day(suggest.date).replace(',', '')}
+    </button>
   )
 }
 

@@ -38,7 +38,17 @@ async function quote(b: Belief): Promise<VenueResult> {
       return []
     })
     .sort((x, y) => x.strike - y.strike)
-  if (!markets.length) return { venue: 'hyperliquid', available: false, reason: `No ${b.asset} outcome markets settling on ${b.date}`, link }
+
+  // Hyperliquid's own daily market is the one market makers always quote. When the sentence misses, offer it:
+  // the soonest one, at a level just under its strike so the sentence lands on it.
+  const daily = meta.outcomes
+    .map((o) => parseSpec(o.description))
+    .filter((s) => s.class === 'priceBinary' && s.underlying === b.asset && hlTime(s.expiry) > new Date())
+    .sort((x, y) => x.expiry.localeCompare(y.expiry))[0]
+  const suggest = daily ? { level: Math.floor(+daily.targetPrice), date: hlTime(daily.expiry).toISOString().slice(0, 10) } : undefined
+  const missed = (reason: string): VenueResult => ({ venue: 'hyperliquid', available: false, reason, link, suggest })
+
+  if (!markets.length) return missed(`No ${b.asset} market that day`)
 
   // Side 0 is YES; its spot coin is "#<10 × outcome + side>".
   const books = await Promise.all(markets.map((m) => info<{ levels: [Level[], Level[]] }>({ type: 'l2Book', coin: `#${10 * m.id}` })))
@@ -50,10 +60,8 @@ async function quote(b: Belief): Promise<VenueResult> {
   })
 
   const m = withBooks.find((x) => x.strike >= b.level)
-  const liveElsewhere = withBooks.filter((x) => x.live && x !== m).map((x) => `$${x.strike}`)
-  const hint = liveElsewhere.length ? `; liquid on that date only at ${liveElsewhere.join(', ')}` : ''
-  if (!m) return { venue: 'hyperliquid', available: false, reason: `No strike at or above $${b.level}${hint}`, link }
-  if (!m.live) return { venue: 'hyperliquid', available: false, reason: `The $${m.strike} market has only placeholder quotes${hint}`, link }
+  if (!m) return missed(`No market at or above $${b.level.toLocaleString('en-US')} that day`)
+  if (!m.live) return missed(`Nobody is trading the $${m.strike.toLocaleString('en-US')} market yet`)
 
   // Walk the YES asks with the stake, in whole shares (outcome sizes are integers on the book).
   let left = b.stake
