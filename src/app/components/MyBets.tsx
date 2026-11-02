@@ -4,10 +4,13 @@ import { Fragment, useState } from 'react'
 import type { Position, PositionStatus } from '@/lib/exec/types'
 import { day, shortTitle, signedUsd, usd } from '@/lib/format'
 import { useWallet } from '@/lib/wallet'
-import { VENUE_NAMES } from './Quotes'
+import type { Cash } from '@/lib/usePositions'
+import type { VenueId } from '@/lib/venues/types'
+import { VENUE_NAMES, VenueMark } from './Quotes'
 import { canSell, SellPanel } from './SellPanel'
 import { Spinner } from './TradePanel'
 import { WalletButton } from './WalletButton'
+import { WithdrawPanel } from './WithdrawPanel'
 
 const OPEN: PositionStatus[] = ['live', 'claimable']
 type Filter = 'open' | 'resolved'
@@ -31,8 +34,9 @@ export function StatusChip({ status }: { status: PositionStatus }) {
   }
 }
 
-export function MyBets({ positions, error, loading, refresh }: {
+export function MyBets({ positions, cash, error, loading, refresh }: {
   positions: Position[] | null
+  cash: Cash
   error: string | null
   loading: boolean
   refresh: () => void
@@ -78,12 +82,15 @@ export function MyBets({ positions, error, loading, refresh }: {
 
   if (positions.length === 0) {
     return (
-      <section aria-label="No bets yet" className={`${card} mx-auto flex max-w-md flex-col items-center gap-3 rounded-[20px] px-5 py-7 text-center`}>
-        <p className="text-[22px] font-medium tracking-[-0.02em] text-ink-2">I think<span className="text-win">…</span></p>
-        <h2 className="text-[17px] font-semibold">No bets yet</h2>
-        <p className="text-sm leading-normal text-muted">Write your first sentence and see what it pays.</p>
-        <a href="#" className="flex min-h-12 items-center rounded-[14px] border border-strong-line px-[22px] text-[15px] font-medium text-ink no-underline hover:bg-raised">Make a bet</a>
-      </section>
+      <div className="flex flex-col gap-6">
+        <CashSection cash={cash} onDone={refresh} />
+        <section aria-label="No bets yet" className={`${card} mx-auto flex w-full max-w-md flex-col items-center gap-3 rounded-[20px] px-5 py-7 text-center`}>
+          <p className="text-[22px] font-medium tracking-[-0.02em] text-ink-2">I think<span className="text-win">…</span></p>
+          <h2 className="text-[17px] font-semibold">No bets yet</h2>
+          <p className="text-sm leading-normal text-muted">Write your first sentence and see what it pays.</p>
+          <a href="#" className="flex min-h-12 items-center rounded-[14px] border border-strong-line px-[22px] text-[15px] font-medium text-ink no-underline hover:bg-raised">Make a bet</a>
+        </section>
+      </div>
     )
   }
 
@@ -118,6 +125,8 @@ export function MyBets({ positions, error, loading, refresh }: {
           <span className={pnlTone}>{signedUsd(pnl)}</span>
         </SummaryCard>
       </section>
+
+      <CashSection cash={cash} onDone={refresh} />
 
       {claimable.length > 0 && (
         <div role="status" className="hidden flex-wrap items-center justify-between gap-4 rounded-2xl border border-win/30 bg-win/[0.07] px-5 py-3.5 md:flex">
@@ -351,5 +360,41 @@ function Figure({ label, center, right, children }: { label: string; center?: bo
       <span className="text-xs text-faint">{label}</span>
       <span className="text-ink">{children}</span>
     </div>
+  )
+}
+
+// Cash sitting in each venue account (winnings, sales, unused deposits), with a way back to the user's wallet.
+function CashSection({ cash, onDone }: { cash: Cash; onDone: () => void }) {
+  const [open, setOpen] = useState<VenueId | null>(null)
+  const rows = (Object.entries(cash) as [VenueId, number][]).filter(([, v]) => v >= 0.01)
+  if (!rows.length) return null
+
+  return (
+    <section aria-labelledby="cash-h" className="flex flex-col gap-2">
+      <h2 id="cash-h" className="text-[13px] text-muted">Money at the venues</h2>
+      <ul className="flex flex-col gap-2 md:grid md:grid-cols-2">
+        {rows.map(([venue, amount]) => (
+          <li key={venue} className={`${card} p-4`}>
+            <div className="flex items-center justify-between gap-3">
+              <span className="flex items-center gap-2.5">
+                <VenueMark venue={venue} />
+                <span className="flex flex-col">
+                  <span className="text-[15px] font-medium text-ink">{usd(amount)}</span>
+                  <span className="text-xs text-faint">in your {VENUE_NAMES[venue]} account</span>
+                </span>
+              </span>
+              {open !== venue && (
+                <button onClick={() => setOpen(venue)} className="min-h-11 rounded-xl border border-strong-line px-4 text-sm font-medium text-ink transition hover:bg-raised">
+                  Withdraw
+                </button>
+              )}
+            </div>
+            {open === venue && (
+              <WithdrawPanel venue={venue} available={amount} onClose={() => setOpen(null)} onDone={onDone} />
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
   )
 }

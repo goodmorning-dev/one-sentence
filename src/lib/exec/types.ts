@@ -61,6 +61,24 @@ export interface SellQuote {
   note?: string
 }
 
+// Where a venue can send money back: a token on a chain, always to the user's own wallet.
+export interface WithdrawTarget {
+  chainId: ChainId
+  chainName: string
+  token: `0x${string}`
+  symbol: string
+}
+
+export interface Withdrawal {
+  targets: WithdrawTarget[]
+  fee: number // flat USD the venue keeps
+  min: number // smallest amount worth sending (above the fee)
+  eta: string
+  // Sends `amount` of the user's venue balance to their own wallet on `to`; returns an id to follow it.
+  withdraw(amount: number, to: WithdrawTarget): Promise<string>
+  status(id: string): Promise<FundingState>
+}
+
 // Both take the quote being bet on, so a venue can size steps to it (e.g. move only what the bet needs).
 export interface VenueSession {
   account(q?: Quote): Promise<VenueAccount>
@@ -68,6 +86,7 @@ export interface VenueSession {
   trade(q: Quote): Promise<TradeResult>
   // Sells a live position at no less than the quote's limit; runs any one-time approval the sale needs first.
   sell?(p: Position, q: SellQuote): Promise<TradeResult>
+  withdrawal?: Withdrawal
   funding?: Funding // absent when deposits happen only on the venue's own site
 }
 
@@ -101,6 +120,8 @@ export interface Executor {
   sellQuote?(p: Position): Promise<SellQuote>
   // Explains the wallet requests a sale may trigger, shown before the user confirms.
   sellNote?: string
+  // Read-only: cash sitting in the user's venue account (winnings, sales, unused deposits), in USD.
+  cash?(owner: `0x${string}`): Promise<number>
 }
 
 // Quotes are shown only once every estimate is re-priced. A quote we can't check is withdrawn rather than shown

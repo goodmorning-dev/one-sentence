@@ -4,7 +4,7 @@ import { arbitrum } from 'viem/chains'
 import type { AbstractWallet } from '@nktkas/hyperliquid/signing'
 import type { Quote } from '../venues/types'
 import { hyperliquidPositions } from './hyperliquid-positions'
-import type { Executor, Funding, FundingState, Position, SellQuote, SetupStep, VenueSession } from './types'
+import type { Executor, Funding, FundingState, Position, SellQuote, SetupStep, VenueSession, Withdrawal } from './types'
 
 // Hyperliquid account model: the account IS the user's wallet address. HIP-4 outcome shares trade like spot
 // against USDC. Three one-time steps, all signed by the user's wallet on Arbitrum, none moving money:
@@ -20,6 +20,7 @@ const FEE_UNITS = Math.round(FEE_PERCENT * 1000) // the order's `f`, in 0.001% s
 const BRIDGE: Address = '0x2Df1c51E09aECF9cacB7bc98cB1742757f163dF7' // Arbitrum → Hyperliquid USDC bridge
 const ARBITRUM_USDC: Address = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831'
 const MIN_DEPOSIT = 5 // the bridge loses anything smaller
+const WITHDRAW_FEE = 1 // Hyperliquid keeps $1 per withdrawal to Arbitrum
 const AGENT_NAME = 'one sentence' // named, so it never replaces the agent of the user's own Hyperliquid app
 
 // Hyperliquid's EIP-712 type names contain a colon ("HyperliquidTransaction:ApproveAgent"). Wallets sign them,
@@ -123,8 +124,36 @@ async function open(wallet: WalletClient): Promise<VenueSession> {
     },
   }
 
+  // Hyperliquid pays out to Arbitrum only, from the perps balance (validators send it; $1 fee, 3–4 minutes).
+  // Standard accounts keep winnings and sales in spot, so that part moves to perps first: two signatures.
+  const arbitrumUsdc = async () => {
+    const client = createPublicClient({ chain: arbitrum, transport: http() })
+    return Number(await client.readContract({ address: ARBITRUM_USDC, abi: erc20Abi, functionName: 'balanceOf', args: [user] })) / 1e6
+  }
+  const withdrawal: Withdrawal = {
+    targets: [{ chainId: 42161, chainName: 'Arbitrum', token: ARBITRUM_USDC, symbol: 'USDC' }],
+    fee: WITHDRAW_FEE,
+    min: WITHDRAW_FEE + 1,
+    eta: '3–4 minutes',
+    async withdraw(amount) {
+      const s = await state()
+      const before = await arbitrumUsdc()
+      await onArbitrum()
+      const fromSpot = s.unified ? 0 : Math.max(0, +(amount - s.perpsFree).toFixed(2))
+      if (fromSpot > 0) await master.usdClassTransfer({ amount: fromSpot.toFixed(2), toPerp: true })
+      await master.withdraw3({ destination: user, amount: amount.toFixed(2) })
+      return JSON.stringify({ before, expect: amount - WITHDRAW_FEE })
+    },
+    // Done once the wallet on Arbitrum has grown by what was sent, minus Hyperliquid's fee.
+    async status(id) {
+      const { before, expect } = JSON.parse(id)
+      return (await arbitrumUsdc()) >= before + expect - 0.01 ? 'done' : 'processing'
+    },
+  }
+
   return {
     funding,
+    withdrawal,
 
     async account(q) {
       const s = await state()
@@ -232,6 +261,15 @@ async function open(wallet: WalletClient): Promise<VenueSession> {
 const usd = (n: number) => `$${n.toFixed(2)}`
 
 const CLOSE_FEE_RATE = 0.0007 // Hyperliquid's own fee when closing an outcome position, base tier
+
+// Read-only: USDC in the user's Hyperliquid account, spot (where winnings and sales land) plus perps.
+async function cash(owner: string): Promise<number> {
+  const post = (body: object) =>
+    fetch('https://api.hyperliquid.xyz/info', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json())
+  const [spot, perps] = await Promise.all([post({ type: 'spotClearinghouseState', user: owner }), post({ type: 'clearinghouseState', user: owner })])
+  const usdc = (spot.balances ?? []).find((b: { coin: string }) => b.coin === 'USDC')
+  return (usdc ? Number(usdc.total) - Number(usdc.hold) : 0) + Number(perps.withdrawable ?? 0)
+}
 const MIN_ORDER_USD = 10
 
 // Walks the YES bids from the top with the whole-share position, Hyperliquid's close fee and our builder fee included.
@@ -271,4 +309,5 @@ export const hyperliquidExecutor: Executor = {
   positions: hyperliquidPositions,
   sellQuote,
   sellNote: 'If you bought this outside One sentence, your wallet asks for up to two one-time approvals first. Neither moves money.',
+  cash,
 }

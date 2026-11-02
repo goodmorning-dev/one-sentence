@@ -1,5 +1,5 @@
 import type { WalletClient } from 'viem'
-import { polymarketFunding } from './polymarket-funding'
+import { polymarketCash, polymarketFunding, polymarketWithdrawal, PUSD } from './polymarket-funding'
 import { polymarketPositions } from './polymarket-positions'
 import { CLOB, priceFromBook } from '../venues/polymarket'
 import type { Quote, VenueResult } from '../venues/types'
@@ -22,9 +22,14 @@ async function open(wallet: WalletClient): Promise<VenueSession> {
   })
   const address = client.account.wallet
   const funding = polymarketFunding(address, client.account.signer)
+  // pUSD leaves the account through its own gasless transfer, signed by the user's wallet.
+  const withdrawal = polymarketWithdrawal(address, client.account.signer, async (to, amount) => {
+    await (await client.transferErc20({ tokenAddress: PUSD, recipientAddress: to, amount })).wait()
+  })
 
   return {
     funding,
+    withdrawal,
 
     async account() {
       const [approvals, funds] = await Promise.all([
@@ -151,4 +156,5 @@ export const polymarketExecutor: Executor = {
   refine,
   sellQuote,
   sellNote: 'Your wallet asks you to sign in to Polymarket first. That doesn’t move money.',
+  cash: polymarketCash,
 }
