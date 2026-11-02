@@ -4,7 +4,7 @@ import { arbitrum } from 'viem/chains'
 import type { AbstractWallet } from '@nktkas/hyperliquid/signing'
 import type { Quote } from '../venues/types'
 import { hyperliquidPositions } from './hyperliquid-positions'
-import type { Executor, Funding, FundingState, Position, SellQuote, SetupStep, VenueSession, Withdrawal } from './types'
+import type { Executor, Funding, FundingState, Position, SellQuote, SetupStep, Transfer, VenueSession, Withdrawal } from './types'
 
 // Hyperliquid account model: the account IS the user's wallet address. HIP-4 outcome shares trade like spot
 // against USDC. Three one-time steps, all signed by the user's wallet on Arbitrum, none moving money:
@@ -262,6 +262,28 @@ const usd = (n: number) => `$${n.toFixed(2)}`
 
 const CLOSE_FEE_RATE = 0.0007 // Hyperliquid's own fee when closing an outcome position, base tier
 
+// Read-only: deposits from and withdrawals to Arbitrum, from Hyperliquid's own ledger. Settled on arrival.
+async function history(owner: string): Promise<Transfer[]> {
+  const r = await fetch('https://api.hyperliquid.xyz/info', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ type: 'userNonFundingLedgerUpdates', user: owner, startTime: 0 }),
+  })
+  const ledger: { time: number; hash: string; delta: { type: string; usdc?: string; fee?: string } }[] = await r.json()
+  return ledger
+    .filter((e) => e.delta.type === 'deposit' || e.delta.type === 'withdraw')
+    .map((e) => ({
+      venue: 'hyperliquid' as const,
+      id: e.hash,
+      kind: e.delta.type === 'deposit' ? ('deposit' as const) : ('withdrawal' as const),
+      amount: Number(e.delta.usdc ?? 0),
+      chain: 'Arbitrum',
+      status: 'done' as const,
+      time: e.time,
+      fee: e.delta.fee ? Number(e.delta.fee) : undefined,
+    }))
+}
+
 // Read-only: USDC in the user's Hyperliquid account, spot (where winnings and sales land) plus perps.
 async function cash(owner: string): Promise<number> {
   const post = (body: object) =>
@@ -310,4 +332,5 @@ export const hyperliquidExecutor: Executor = {
   sellQuote,
   sellNote: 'If you bought this outside One sentence, your wallet asks for up to two one-time approvals first. Neither moves money.',
   cash,
+  history,
 }

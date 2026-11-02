@@ -260,7 +260,7 @@ export function Spinner() {
 const PROGRESS: Record<FundingState, number> = { waiting: 20, processing: 60, done: 100, failed: 100 }
 
 // Deposit from the user's own wallet on any supported chain. The venue converts it and credits their account.
-function FundingForm({ venueName, funding, suggested, busy, run, onArrived }: {
+export function FundingForm({ venueName, funding, suggested, busy, run, onArrived }: {
   venueName: string
   funding: Funding
   suggested: number

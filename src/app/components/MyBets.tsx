@@ -5,12 +5,10 @@ import type { Position, PositionStatus } from '@/lib/exec/types'
 import { day, shortTitle, signedUsd, usd } from '@/lib/format'
 import { useWallet } from '@/lib/wallet'
 import type { Cash } from '@/lib/usePositions'
-import type { VenueId } from '@/lib/venues/types'
-import { VENUE_NAMES, VenueMark } from './Quotes'
+import { VENUE_NAMES } from './Quotes'
 import { canSell, SellPanel } from './SellPanel'
 import { Spinner } from './TradePanel'
 import { WalletButton } from './WalletButton'
-import { WithdrawPanel } from './WithdrawPanel'
 
 const OPEN: PositionStatus[] = ['live', 'claimable']
 type Filter = 'open' | 'resolved'
@@ -363,38 +361,16 @@ function Figure({ label, center, right, children }: { label: string; center?: bo
   )
 }
 
-// Cash sitting in each venue account (winnings, sales, unused deposits), with a way back to the user's wallet.
-function CashSection({ cash, onDone }: { cash: Cash; onDone: () => void }) {
-  const [open, setOpen] = useState<VenueId | null>(null)
-  const rows = (Object.entries(cash) as [VenueId, number][]).filter(([, v]) => v >= 0.01)
-  if (!rows.length) return null
-
+// A pointer to the Wallet tab, where cash is added and withdrawn; shown only when there's cash sitting idle.
+function CashSection({ cash }: { cash: Cash; onDone: () => void }) {
+  const total = Object.values(cash).reduce((s, v) => s + (v ?? 0), 0)
+  if (total < 0.01) return null
   return (
-    <section aria-labelledby="cash-h" className="flex flex-col gap-2">
-      <h2 id="cash-h" className="text-[13px] text-muted">Money at the venues</h2>
-      <ul className="flex flex-col gap-2 md:grid md:grid-cols-2">
-        {rows.map(([venue, amount]) => (
-          <li key={venue} className={`${card} p-4`}>
-            <div className="flex items-center justify-between gap-3">
-              <span className="flex items-center gap-2.5">
-                <VenueMark venue={venue} />
-                <span className="flex flex-col">
-                  <span className="text-[15px] font-medium text-ink">{usd(amount)}</span>
-                  <span className="text-xs text-faint">in your {VENUE_NAMES[venue]} account</span>
-                </span>
-              </span>
-              {open !== venue && (
-                <button onClick={() => setOpen(venue)} className="min-h-11 rounded-xl border border-strong-line px-4 text-sm font-medium text-ink transition hover:bg-raised">
-                  Withdraw
-                </button>
-              )}
-            </div>
-            {open === venue && (
-              <WithdrawPanel venue={venue} available={amount} onClose={() => setOpen(null)} onDone={onDone} />
-            )}
-          </li>
-        ))}
-      </ul>
-    </section>
+    <a href="#wallet" className={`${card} flex items-center justify-between gap-3 px-4 py-3.5 text-sm text-ink no-underline transition hover:border-line`}>
+      <span>
+        <span className="font-semibold text-win">{usd(total)}</span> <span className="text-muted">is waiting in your venue accounts</span>
+      </span>
+      <span className="text-muted">Wallet →</span>
+    </a>
   )
 }

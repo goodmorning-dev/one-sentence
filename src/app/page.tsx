@@ -8,17 +8,18 @@ import { useBelief } from '@/lib/useBelief'
 import { usePositions } from '@/lib/usePositions'
 import { Logo, TAGLINE } from './components/Logo'
 import { MyBets } from './components/MyBets'
+import { WalletPage } from './components/WalletPage'
 import { Quotes, type QuotesData } from './components/Quotes'
 import { Sentence } from './components/Sentence'
 import { WalletButton } from './components/WalletButton'
 
-type Tab = 'bet' | 'bets'
+type Tab = 'bet' | 'bets' | 'wallet'
 
 // The tab lives in the URL hash so links like "See it in My bets" and the back button work.
 function useTab(): Tab {
   const [tab, setTab] = useState<Tab>('bet')
   useEffect(() => {
-    const read = () => setTab(location.hash === '#bets' ? 'bets' : 'bet')
+    const read = () => setTab(location.hash === '#bets' ? 'bets' : location.hash === '#wallet' ? 'wallet' : 'bet')
     read()
     addEventListener('hashchange', read)
     return () => removeEventListener('hashchange', read)
@@ -74,12 +75,13 @@ export default function Home() {
             <span aria-hidden className="hidden h-[18px] w-px bg-line lg:block" />
             <span className="hidden text-sm text-muted lg:inline">{TAGLINE}</span>
           </div>
-          <nav aria-label="Sections" className="order-3 -mx-4 grid w-[calc(100%+2rem)] grid-cols-2 sm:order-none sm:mx-0 sm:flex sm:w-auto sm:rounded-full sm:border sm:border-soft-line sm:bg-surface sm:p-1">
+          <nav aria-label="Sections" className="order-3 -mx-4 grid w-[calc(100%+2rem)] grid-cols-3 sm:order-none sm:mx-0 sm:flex sm:w-auto sm:rounded-full sm:border sm:border-soft-line sm:bg-surface sm:p-1">
             <TabLink href="#" active={tab === 'bet'}>New bet</TabLink>
             <TabLink href="#bets" active={tab === 'bets'}>
               My bets
               {open > 0 && <span className={`rounded-full px-[7px] py-px text-xs text-ink-2 ${tab === 'bets' ? 'bg-chip sm:bg-bg' : 'bg-chip'}`}>{open}</span>}
             </TabLink>
+            <TabLink href="#wallet" active={tab === 'wallet'}>Wallet</TabLink>
           </nav>
           <WalletButton />
         </div>
@@ -101,8 +103,10 @@ export default function Home() {
               onTraded={bets.refresh}
             />
           </div>
-        ) : (
+        ) : tab === 'bets' ? (
           <MyBets {...bets} />
+        ) : (
+          <WalletPage {...bets} />
         )}
       </main>
     </div>

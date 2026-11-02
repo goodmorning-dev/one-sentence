@@ -142,7 +142,7 @@ Early and moving fast.
 - Derive: quotes; betting from the app (RFQ) is next.
 - Hyperliquid: quotes, setup, funding from Arbitrum, betting and My bets work.
 - Selling a live bet early from My bets works on Polymarket and Hyperliquid.
-- Withdrawing to your own wallet from My bets: Polymarket to Base, Arbitrum, Polygon, Optimism or Ethereum (free), Hyperliquid to Arbitrum ($1 fee).
+- A Wallet tab with each venue balance, adding money, deposit and withdrawal history, and withdrawing to your own wallet: Polymarket to Base, Arbitrum, Polygon, Optimism or Ethereum (free), Hyperliquid to Arbitrum ($1 fee).
 - Not yet: WalletConnect for mobile wallets,
   a light theme.
 

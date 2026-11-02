@@ -1,5 +1,5 @@
 import type { WalletClient } from 'viem'
-import { polymarketCash, polymarketFunding, polymarketWithdrawal, PUSD } from './polymarket-funding'
+import { polymarketCash, polymarketFunding, polymarketHistory, polymarketWithdrawal, PUSD } from './polymarket-funding'
 import { polymarketPositions } from './polymarket-positions'
 import { CLOB, priceFromBook } from '../venues/polymarket'
 import type { Quote, VenueResult } from '../venues/types'
@@ -157,4 +157,5 @@ export const polymarketExecutor: Executor = {
   sellQuote,
   sellNote: 'Your wallet asks you to sign in to Polymarket first. That doesn’t move money.',
   cash: polymarketCash,
+  history: polymarketHistory,
 }

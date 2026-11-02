@@ -1,6 +1,6 @@
 import { createPublicClient, erc20Abi, http, parseUnits, type Address } from 'viem'
 import { CHAINS } from '../wallet'
-import type { ChainId, Funding, FundingSource, FundingState, Withdrawal, WithdrawTarget } from './types'
+import { chainName, type ChainId, type Funding, type FundingSource, type FundingState, type Transfer, type Withdrawal, type WithdrawTarget } from './types'
 
 // Polymarket Bridge API (docs.polymarket.com/trading/bridge/deposit): it gives each Polymarket wallet its own
 // deposit address per chain family. USDC sent there from any supported chain is swapped to pUSD and credited to the
@@ -119,6 +119,7 @@ export function polymarketWithdrawal(account: Address, owner: Address, sendPusd:
       const body = await r.json()
       const bridge: Address | undefined = body.address?.evm
       if (!r.ok || !bridge) throw new Error(body.error ?? `Polymarket bridge: ${r.status}`)
+      rememberWithdrawal(owner, bridge) // before sending, so the history finds it even if the page closes mid-way
       await sendPusd(bridge, parseUnits(amount.toFixed(6), 6))
       return bridge
     },
@@ -135,4 +136,67 @@ export async function polymarketCash(owner: string): Promise<number> {
   const client = createPublicClient({ chain: CHAINS[137], transport: http() })
   const raw = await client.readContract({ address: PUSD, abi: erc20Abi, functionName: 'balanceOf', args: [account] })
   return Number(raw) / 1e6
+}
+
+// Withdrawal addresses are new every time, so the bridge can't list them back: we remember the ones made here.
+const withdrawalsKey = (owner: string) => `pm-withdrawals:${owner.toLowerCase()}`
+function rememberedWithdrawals(owner: string): string[] {
+  try {
+    return JSON.parse(localStorage.getItem(withdrawalsKey(owner)) ?? '[]')
+  } catch {
+    return []
+  }
+}
+export function rememberWithdrawal(owner: string, bridgeAddress: string) {
+  try {
+    localStorage.setItem(withdrawalsKey(owner), JSON.stringify([...new Set([bridgeAddress, ...rememberedWithdrawals(owner)])].slice(0, 50)))
+  } catch {}
+}
+
+interface BridgeTx { fromChainId: string; toChainId: string; fromAmountBaseUnit: string; status: string; createdTimeMs?: number; txHash?: string }
+
+// The bridge reports a transfer as legs a few seconds apart (e.g. Base → Polygon, then the USDC → pUSD swap on
+// Polygon). A Polygon leg with a same-amount twin from another chain within a few minutes is that twin's second
+// leg, so only the leg naming the outside chain is kept. A transfer that really is from Polygon has no twin.
+const LEG_WINDOW_MS = 10 * 60 * 1000
+function oneLegEach(txs: BridgeTx[], outside: (t: BridgeTx) => string) {
+  return txs.filter(
+    (t) =>
+      outside(t) !== '137' ||
+      !txs.some(
+        (o) => o !== t && outside(o) !== '137' && o.fromAmountBaseUnit === t.fromAmountBaseUnit && Math.abs((o.createdTimeMs ?? 0) - (t.createdTimeMs ?? 0)) < LEG_WINDOW_MS,
+      ),
+  )
+}
+
+const toTransfer = (kind: Transfer['kind'], outside: (t: BridgeTx) => string) => (t: BridgeTx, i: number): Transfer => ({
+  venue: 'polymarket',
+  id: `${kind}-${t.createdTimeMs ?? i}-${t.txHash ?? ''}`,
+  kind,
+  amount: Number(t.fromAmountBaseUnit) / 1e6,
+  chain: chainName(outside(t)),
+  status: STATE[t.status] ?? 'processing',
+  time: t.createdTimeMs ?? 0,
+})
+
+// Deposits: the wallet's deposit address is permanent, so its status lists every deposit ever made through the
+// bridge. Withdrawals: the status of each withdrawal address remembered in this browser.
+export async function polymarketHistory(owner: string): Promise<Transfer[]> {
+  const profile = await fetch(`https://gamma-api.polymarket.com/public-profile?address=${owner}`)
+  if (!profile.ok) return []
+  const account: string | undefined = (await profile.json()).proxyWallet
+  if (!account) return []
+  const status = async (addr: string): Promise<BridgeTx[]> => (await (await fetch(`${BRIDGE}/status/${addr}?limit=100`)).json()).transactions ?? []
+
+  const dep = await fetch(`${BRIDGE}/deposit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(BUILDER_CODE ? { 'X-Builder-Code': BUILDER_CODE } : {}) },
+    body: JSON.stringify({ address: account }),
+  }).then((r) => r.json())
+  const [deposits, ...withdrawals] = await Promise.all([dep.address?.evm ? status(dep.address.evm) : [], ...rememberedWithdrawals(owner).map(status)])
+
+  return [
+    ...oneLegEach(deposits, (t) => t.fromChainId).map(toTransfer('deposit', (t) => t.fromChainId)),
+    ...withdrawals.flatMap((w) => oneLegEach(w, (t) => t.toChainId).map(toTransfer('withdrawal', (t) => t.toChainId))),
+  ]
 }

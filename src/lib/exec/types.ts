@@ -122,7 +122,23 @@ export interface Executor {
   sellNote?: string
   // Read-only: cash sitting in the user's venue account (winnings, sales, unused deposits), in USD.
   cash?(owner: `0x${string}`): Promise<number>
+  // Read-only: money moved into and out of the venue account, newest first.
+  history?(owner: `0x${string}`): Promise<Transfer[]>
 }
+
+export interface Transfer {
+  venue: VenueId
+  id: string
+  kind: 'deposit' | 'withdrawal'
+  amount: number // USD
+  chain: string // where it came from (deposit) or went to (withdrawal)
+  status: FundingState
+  time: number // ms
+  fee?: number
+}
+
+const CHAIN_NAMES: Record<string, string> = { '1': 'Ethereum', '10': 'Optimism', '137': 'Polygon', '8453': 'Base', '42161': 'Arbitrum', '1151111081099710': 'Solana' }
+export const chainName = (id: string | number) => CHAIN_NAMES[String(id)] ?? `chain ${id}`
 
 // Quotes are shown only once every estimate is re-priced. A quote we can't check is withdrawn rather than shown
 // with numbers we don't trust.
