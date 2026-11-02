@@ -66,6 +66,10 @@ Arbitrum and none of them moving money:
 The bet itself is an immediate-or-cancel buy of whole YES shares, capped at the last price the quote used.
 Hyperliquid's minimum order is $10. Winning shares pay out automatically at settlement.
 
+**Selling early**: any live bet in My bets can be sold before it is decided, priced against the live bids
+with fees shown. On Hyperliquid this is also when our builder fee applies; if the bet was bought elsewhere,
+the sale first asks for the two one-time approvals.
+
 **My bets** reads your open and resolved positions straight from each venue with your wallet address.
 Read-only, no signature.
 
@@ -137,6 +141,7 @@ Early and moving fast.
 - Polymarket: quotes, account setup, funding, betting and My bets work.
 - Derive: quotes; betting from the app (RFQ) is next.
 - Hyperliquid: quotes, setup, funding from Arbitrum, betting and My bets work.
+- Selling a live bet early from My bets works on Polymarket and Hyperliquid.
 - Not yet: collecting winnings from the app (links to the venue), WalletConnect for mobile wallets,
   a light theme.
 

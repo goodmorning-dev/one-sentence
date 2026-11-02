@@ -4,7 +4,7 @@ import { arbitrum } from 'viem/chains'
 import type { AbstractWallet } from '@nktkas/hyperliquid/signing'
 import type { Quote } from '../venues/types'
 import { hyperliquidPositions } from './hyperliquid-positions'
-import type { Executor, Funding, FundingState, SetupStep, VenueSession } from './types'
+import type { Executor, Funding, FundingState, Position, SellQuote, SetupStep, VenueSession } from './types'
 
 // Hyperliquid account model: the account IS the user's wallet address. HIP-4 outcome shares trade like spot
 // against USDC. Three one-time steps, all signed by the user's wallet on Arbitrum, none moving money:
@@ -58,6 +58,18 @@ async function open(wallet: WalletClient): Promise<VenueSession> {
       agentOk: !!agent && agents.some((a) => a.address.toLowerCase() === agent),
       feeOk: maxFee >= FEE_UNITS,
     }
+  }
+
+  async function approveAgent() {
+    const key = generatePrivateKey()
+    await master.approveAgent({ agentAddress: privateKeyToAccount(key).address, agentName: AGENT_NAME })
+    localStorage.setItem(storageKey(user), key)
+    agentKey = key
+  }
+
+  async function approveBuilder() {
+    if (!BUILDER) throw new Error('Hyperliquid builder address is not configured')
+    await master.approveBuilderFee({ builder: BUILDER, maxFeeRate: `${FEE_PERCENT}%` })
   }
 
   // What the bet still needs on the spot side, rounded up to the cent.
@@ -138,18 +150,35 @@ async function open(wallet: WalletClient): Promise<VenueSession> {
 
     async runStep(id, q) {
       if (id === 'agent') {
-        const key = generatePrivateKey()
-        await master.approveAgent({ agentAddress: privateKeyToAccount(key).address, agentName: AGENT_NAME })
-        localStorage.setItem(storageKey(user), key)
-        agentKey = key
+        await approveAgent()
       } else if (id === 'builder') {
-        if (!BUILDER) throw new Error('Hyperliquid builder address is not configured')
-        await master.approveBuilderFee({ builder: BUILDER, maxFeeRate: `${FEE_PERCENT}%` })
+        await approveBuilder()
       } else if (id === 'move') {
         const s = await state()
         const amount = Math.min(shortfall(q, s.spotFree), s.perpsFree)
         await master.usdClassTransfer({ amount: amount.toFixed(2), toPerp: false })
       }
+    },
+
+    // Selling is where our builder fee applies, so a sale makes sure both approvals exist first. Someone who
+    // bought on Hyperliquid's own app reaches this with neither: up to two one-time signatures, no money moved.
+    async sell(p, q) {
+      const s = await state()
+      if (!s.agentOk) await approveAgent()
+      if (!s.feeOk) await approveBuilder()
+      const agent = new ExchangeClient({ transport, wallet: privateKeyToAccount(agentKey!) })
+      const r = await agent.order({
+        orders: [{ a: 100_000_000 + Number(p.id.slice(1)), b: false, p: q.limit, s: String(q.shares), r: false, t: { limit: { tif: 'Ioc' } } }],
+        grouping: 'na',
+        ...(BUILDER ? { builder: { b: BUILDER, f: FEE_UNITS } } : {}),
+      })
+      const status = r.response.data.statuses[0]
+      if (typeof status === 'object' && 'filled' in status) {
+        const { totalSz, avgPx } = status.filled
+        return { ok: true, message: `Sold ${Number(totalSz)} shares at ${Number(avgPx).toFixed(4)}` }
+      }
+      if (typeof status === 'object' && 'error' in status) return { ok: false, message: String(status.error) }
+      return { ok: false, message: 'Nothing sold at this price; the bids moved. Try again.' }
     },
 
     async trade(q) {
@@ -175,4 +204,44 @@ async function open(wallet: WalletClient): Promise<VenueSession> {
 
 const usd = (n: number) => `$${n.toFixed(2)}`
 
-export const hyperliquidExecutor: Executor = { venue: 'hyperliquid', chainId: 42161, open, positions: hyperliquidPositions }
+const CLOSE_FEE_RATE = 0.0007 // Hyperliquid's own fee when closing an outcome position, base tier
+const MIN_ORDER_USD = 10
+
+// Walks the YES bids from the top with the whole-share position, Hyperliquid's close fee and our builder fee included.
+async function sellQuote(p: Position): Promise<SellQuote> {
+  const r = await fetch('https://api.hyperliquid.xyz/info', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ type: 'l2Book', coin: `#${p.id.slice(1)}` }),
+  })
+  const bids: { px: string; sz: string }[] = (await r.json()).levels?.[0] ?? []
+  let left = Math.floor(p.shares)
+  let shares = 0
+  let gross = 0
+  let limit = ''
+  for (const { px, sz } of bids) {
+    if (left <= 0) break
+    const take = Math.min(left, Math.floor(Number(sz)))
+    if (take <= 0) continue
+    shares += take
+    gross += take * Number(px)
+    left -= take
+    limit = px
+  }
+  if (!shares) throw new Error('Nobody is buying this right now')
+  const fees = gross * (CLOSE_FEE_RATE + FEE_PERCENT / 100)
+  const notes = [
+    ...(shares < Math.floor(p.shares) ? [`Only ${shares} of your ${Math.floor(p.shares)} shares can be sold right now`] : []),
+    ...(shares * Number(limit) < MIN_ORDER_USD ? [`Hyperliquid may refuse sales under $${MIN_ORDER_USD}`] : []),
+  ]
+  return { shares, proceeds: gross - fees, fees, avgPrice: gross / shares, limit, note: notes.join('. ') || undefined }
+}
+
+export const hyperliquidExecutor: Executor = {
+  venue: 'hyperliquid',
+  chainId: 42161,
+  open,
+  positions: hyperliquidPositions,
+  sellQuote,
+  sellNote: 'If you bought this outside One sentence, your wallet asks for up to two one-time approvals first. Neither moves money.',
+}

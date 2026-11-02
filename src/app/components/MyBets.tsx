@@ -1,10 +1,11 @@
 'use client'
 
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import type { Position, PositionStatus } from '@/lib/exec/types'
 import { day, shortTitle, signedUsd, usd } from '@/lib/format'
 import { useWallet } from '@/lib/wallet'
 import { VENUE_NAMES } from './Quotes'
+import { canSell, SellPanel } from './SellPanel'
 import { Spinner } from './TradePanel'
 import { WalletButton } from './WalletButton'
 
@@ -38,6 +39,9 @@ export function MyBets({ positions, error, loading, refresh }: {
 }) {
   const { address } = useWallet()
   const [filter, setFilter] = useState<Filter>('open')
+  // One sale open at a time, keyed by venue and position.
+  const [selling, setSelling] = useState<string | null>(null)
+  const sell: SellState = { selling, setSelling, onSold: () => { setSelling(null); refresh() } }
 
   if (!address) {
     return (
@@ -161,8 +165,10 @@ export function MyBets({ positions, error, loading, refresh }: {
         {filter === 'open' ? (
           open.length ? (
             <>
-              <ul className="flex flex-col gap-2 md:hidden">{open.map((p) => <OpenBet key={`${p.venue}-${p.id}`} p={p} />)}</ul>
-              <OpenTable bets={open} />
+              <ul className="flex flex-col gap-2 md:hidden">
+                {open.map((p) => <OpenBet key={`${p.venue}-${p.id}`} p={p} sell={sell} />)}
+              </ul>
+              <OpenTable bets={open} sell={sell} />
             </>
           ) : (
             <p className={`${card} p-6 text-center text-sm text-muted`}>Nothing open right now. <a href="#">Make a bet</a></p>
@@ -198,8 +204,13 @@ function SummaryCard({ label, sub, className, children }: { label: string; sub: 
   )
 }
 
+interface SellState { selling: string | null; setSelling: (k: string | null) => void; onSold: () => void }
+const keyOf = (p: Position) => `${p.venue}-${p.id}`
+
+const sellBtn = 'min-h-11 rounded-xl border border-strong-line px-4 text-sm font-medium text-ink transition hover:bg-raised'
+
 // Desktop: open bets as a table, one row per bet, with the action on the right.
-function OpenTable({ bets }: { bets: Position[] }) {
+function OpenTable({ bets, sell }: { bets: Position[]; sell: SellState }) {
   const th = 'px-3 py-4 font-medium'
   return (
     <div className="hidden overflow-x-auto rounded-[20px] border border-soft-line bg-surface md:block">
@@ -217,8 +228,10 @@ function OpenTable({ bets }: { bets: Position[] }) {
         <tbody>
           {bets.map((p) => {
             const claimable = p.status === 'claimable'
+            const selling = sell.selling === keyOf(p)
             return (
-              <tr key={`${p.venue}-${p.id}`} className={`border-t border-chip ${claimable ? 'bg-win/[0.04]' : ''}`}>
+              <Fragment key={keyOf(p)}>
+              <tr className={`border-t border-chip ${claimable ? 'bg-win/[0.04]' : ''}`}>
                 <td className="py-[18px] pl-6 pr-3">
                   <span className="flex flex-col gap-1">
                     <span className="font-medium">{shortTitle(p.title)}{p.outcome !== 'Yes' ? ` · ${p.outcome}` : ''}</span>
@@ -237,12 +250,23 @@ function OpenTable({ bets }: { bets: Position[] }) {
                       Collect
                     </a>
                   ) : (
-                    <a href={p.link} target="_blank" rel="noreferrer" className="text-sm text-muted hover:text-ink">
-                      View on {VENUE_NAMES[p.venue]}
-                    </a>
+                    <span className="inline-flex items-center gap-4">
+                      <a href={p.link} target="_blank" rel="noreferrer" className="text-sm text-muted hover:text-ink">
+                        View on {VENUE_NAMES[p.venue]}
+                      </a>
+                      {canSell(p) && !selling && <button onClick={() => sell.setSelling(keyOf(p))} className={sellBtn}>Sell</button>}
+                    </span>
                   )}
                 </td>
               </tr>
+              {selling && (
+                <tr>
+                  <td colSpan={6} className="px-6 pb-5">
+                    <SellPanel p={p} onClose={() => sell.setSelling(null)} onSold={sell.onSold} />
+                  </td>
+                </tr>
+              )}
+              </Fragment>
             )
           })}
         </tbody>
@@ -267,8 +291,9 @@ function ResolvedCard({ p }: { p: Position }) {
   )
 }
 
-function OpenBet({ p }: { p: Position }) {
+function OpenBet({ p, sell }: { p: Position; sell: SellState }) {
   const claimable = p.status === 'claimable'
+  const selling = sell.selling === keyOf(p)
   return (
     <li className={`flex flex-col gap-3 rounded-2xl border bg-surface p-4 ${claimable ? 'border-win/40' : 'border-soft-line'}`}>
       <div className="flex items-start justify-between gap-3">
@@ -294,6 +319,12 @@ function OpenBet({ p }: { p: Position }) {
           <Figure label="If right" right><span className="font-medium text-win">{usd(p.payoutIfRight)}</span></Figure>
         </div>
       )}
+      {canSell(p) &&
+        (selling ? (
+          <SellPanel p={p} onClose={() => sell.setSelling(null)} onSold={sell.onSold} />
+        ) : (
+          <button onClick={() => sell.setSelling(keyOf(p))} className={`${sellBtn} w-full`}>Sell now</button>
+        ))}
     </li>
   )
 }

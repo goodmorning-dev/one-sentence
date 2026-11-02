@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { executors } from '@/lib/exec'
+import { sessionFor } from '@/lib/exec/sessions'
 import type { Funding, FundingSource, FundingState, SetupStep, TradeResult, VenueAccount, VenueSession } from '@/lib/exec/types'
 import { usd } from '@/lib/format'
 import type { Quote } from '@/lib/venues/types'
@@ -79,8 +80,7 @@ export function TradePanel({ quote, venueName, primary, open, onOpen, onClose, o
 
   const openSession = () =>
     run(`Opening your ${venueName} account. If your wallet asks for a signature, it doesn’t move money.`, async () => {
-      const client = await wallet.clientOn(executor.chainId)
-      session.current = await executor.open(client)
+      session.current = await sessionFor(executor, wallet.address!, () => wallet.clientOn(executor.chainId))
       await refreshAccount()
     })
 

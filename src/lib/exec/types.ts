@@ -51,11 +51,23 @@ export interface Funding {
   status(id: string): Promise<FundingState>
 }
 
+// What selling a position right now would pay, walked against the live bids, fees included.
+export interface SellQuote {
+  shares: number // what the bids can take now (may be less than held)
+  proceeds: number // USD after fees
+  fees: number
+  avgPrice: number // per share, before fees
+  limit: string // lowest price the order accepts: the last bid level the walk used
+  note?: string
+}
+
 // Both take the quote being bet on, so a venue can size steps to it (e.g. move only what the bet needs).
 export interface VenueSession {
   account(q?: Quote): Promise<VenueAccount>
   runStep(id: string, q?: Quote): Promise<void>
   trade(q: Quote): Promise<TradeResult>
+  // Sells a live position at no less than the quote's limit; runs any one-time approval the sale needs first.
+  sell?(p: Position, q: SellQuote): Promise<TradeResult>
   funding?: Funding // absent when deposits happen only on the venue's own site
 }
 
@@ -85,6 +97,10 @@ export interface Executor {
   positions(owner: `0x${string}`): Promise<Position[]>
   // Re-prices a quote the server could only estimate, from the browser's own view of the venue.
   refine?(q: Quote): Promise<VenueResult>
+  // Read-only: what selling this position now would pay. Present when the venue supports selling from here.
+  sellQuote?(p: Position): Promise<SellQuote>
+  // Explains the wallet requests a sale may trigger, shown before the user confirms.
+  sellNote?: string
 }
 
 // Quotes are shown only once every estimate is re-priced. A quote we can't check is withdrawn rather than shown
