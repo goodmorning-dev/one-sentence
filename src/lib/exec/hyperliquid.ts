@@ -22,6 +22,19 @@ const ARBITRUM_USDC: Address = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831'
 const MIN_DEPOSIT = 5 // the bridge loses anything smaller
 const AGENT_NAME = 'one sentence' // named, so it never replaces the agent of the user's own Hyperliquid app
 
+// Hyperliquid's EIP-712 type names contain a colon ("HyperliquidTransaction:ApproveAgent"). Wallets sign them,
+// but viem refuses them before the request reaches the wallet ("Struct type … is invalid"), so the typed data
+// goes to the wallet directly, the same eth_signTypedData_v4 call Hyperliquid's own app makes.
+function directSigner(wallet: WalletClient): AbstractWallet {
+  const address = wallet.account!.address
+  return {
+    signTypedData: (params: object) =>
+      wallet.request({ method: 'eth_signTypedData_v4', params: [address, JSON.stringify(params)] }),
+    getAddresses: async () => [address],
+    getChainId: () => wallet.getChainId(),
+  }
+}
+
 const storageKey = (user: string) => `hl-agent:${user.toLowerCase()}`
 function loadAgent(user: string): Hex | null {
   try {
@@ -36,8 +49,8 @@ async function open(wallet: WalletClient): Promise<VenueSession> {
   const transport = new HttpTransport()
   const info = new InfoClient({ transport })
   const user = wallet.account!.address
-  // Signs the user-level actions on Arbitrum. viem's client type is wider than the SDK's, same shape at runtime.
-  const master = new ExchangeClient({ transport, wallet: wallet as unknown as AbstractWallet })
+  // Signs the user-level actions on Arbitrum.
+  const master = new ExchangeClient({ transport, wallet: directSigner(wallet) })
   let agentKey = loadAgent(user)
 
   async function state() {
