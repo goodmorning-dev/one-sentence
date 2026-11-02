@@ -24,6 +24,8 @@ const quietBtn = 'min-h-[52px] rounded-[14px] border border-line px-4 text-[15px
 const STEP_LABEL: Record<string, { todo: string; done: string }> = {
   wallet: { todo: 'Create account', done: 'Account created' },
   approvals: { todo: 'Allow trading', done: 'Trading allowed' },
+  agent: { todo: 'Allow betting from here', done: 'Betting allowed' },
+  builder: { todo: 'Approve our fee', done: 'Fee approved' },
   funds: { todo: 'Add money', done: 'Money added' },
 }
 
@@ -67,13 +69,16 @@ export function TradePanel({ quote, venueName, primary, open, onOpen, onClose, o
     setResult(null)
   }, [wallet.address])
 
-  const refreshAccount = useCallback(async () => setAccount(await session.current!.account()), [])
+  // The venue sizes some steps to the bet (e.g. how much to move), so it always sees the latest quote.
+  const latest = useRef(quote)
+  latest.current = quote
+  const refreshAccount = useCallback(async () => setAccount(await session.current!.account(latest.current)), [])
 
   if (!executor) return null
   const stake = usd(quote.cost, quote.cost % 1 ? 2 : 0)
 
   const openSession = () =>
-    run('It’s asking you to sign in to your ' + venueName + ' account. This doesn’t move money.', async () => {
+    run(`Opening your ${venueName} account. If your wallet asks for a signature, it doesn’t move money.`, async () => {
       const client = await wallet.clientOn(executor.chainId)
       session.current = await executor.open(client)
       await refreshAccount()
@@ -133,9 +138,9 @@ export function TradePanel({ quote, venueName, primary, open, onOpen, onClose, o
   const ready = !!account && !current && enough
   const fundingNeeded = !!account && (current?.id === 'funds' || (!current && !enough))
 
-  const runStep = (id: string) =>
-    run('It’s asking you to let ' + venueName + ' place bets for this account. This doesn’t move money.', async () => {
-      await session.current!.runStep(id)
+  const runStep = (step: SetupStep) =>
+    run(step.prompt ?? `It’s asking you to let ${venueName} place bets for this account. This doesn’t move money.`, async () => {
+      await session.current!.runStep(step.id, quote)
       await refreshAccount()
     })
 
@@ -202,7 +207,7 @@ export function TradePanel({ quote, venueName, primary, open, onOpen, onClose, o
         ) : !account ? (
           <button onClick={openSession} className={`${primaryBtn} flex-[2_1_auto] sm:flex-none`}>{error ? 'Try again' : 'Open account'}</button>
         ) : current?.runnable ? (
-          <button onClick={() => runStep(current.id)} className={`${primaryBtn} flex-[2_1_auto] sm:flex-none`}>{STEP_LABEL[current.id]?.todo ?? current.label}</button>
+          <button onClick={() => runStep(current)} className={`${primaryBtn} flex-[2_1_auto] sm:flex-none`}>{STEP_LABEL[current.id]?.todo ?? current.label}</button>
         ) : ready ? (
           <button onClick={trade} className={`${primaryBtn} flex-[2_1_auto] sm:flex-none`}>Confirm bet · {stake}</button>
         ) : null}
@@ -377,7 +382,7 @@ function FundingForm({ venueName, funding, suggested, busy, run, onArrived }: {
               }`}
             >
               <span className="font-medium text-ink">{s.chainName}{s.symbol !== 'USDC' ? ` · ${s.symbol}` : ''}</span>
-              <span className="text-xs text-muted">{usd(s.balance)} · ~3 min</span>
+              <span className="text-xs text-muted">{usd(s.balance)} · {s.eta ?? '~3 min'}</span>
             </button>
           ))}
         </div>

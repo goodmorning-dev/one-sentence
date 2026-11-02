@@ -20,7 +20,7 @@ so you can always see and manage them on the venue's own site too.
 |---|---|---|---|
 | [Polymarket](https://polymarket.com) | YES share in "Ethereum above ___ on <date>?" | $1 per share if right | Yes |
 | [Derive](https://derive.xyz) | Call spread: buy the call below X, sell the X call | Full width above X, part of it just below | Link out (RFQ next) |
-| [Hyperliquid](https://hyperliquid.xyz) (HIP-4) | YES outcome token | $1 per token if right | Link out |
+| [Hyperliquid](https://hyperliquid.xyz) (HIP-4) | YES outcome token | $1 per token if right | Yes |
 
 Each venue decides at its own time from its own price source. Every quote shows both under **Details**,
 and only quotes on the same level are compared.
@@ -49,6 +49,22 @@ A quote that pays back no more than it costs is dropped: the market already trea
    Polymarket's bridge and arrives as pUSD in your account, usually within minutes.
 5. **Confirm the bet.** A market order that spends at most your stake and never pays more than the quoted
    price allows. Orders carry our builder code, which is how the app can earn a fee.
+
+## Placing a bet (Hyperliquid)
+
+Your Hyperliquid account is your wallet address. One-time setup, each step signed by your wallet on
+Arbitrum and none of them moving money:
+
+1. **Allow betting from here.** Approves a key that lives in your browser and signs orders. It can place
+   bets, never withdraw. It is a named key, so it doesn't replace the one Hyperliquid's own app uses.
+2. **Approve our fee.** Hyperliquid charges builder fees on outcome markets only when you sell, never when
+   you buy.
+3. **Add money**: USDC from Arbitrum goes through Hyperliquid's bridge and arrives in under a minute
+   (minimum $5; the bridge loses anything smaller). In a standard account deposits land in perps, so the
+   app offers to move what the bet needs to your spot balance.
+
+The bet itself is an immediate-or-cancel buy of whole YES shares, capped at the last price the quote used.
+Hyperliquid's minimum order is $10. Winning shares pay out automatically at settlement.
 
 **My bets** reads your open and resolved positions straight from each venue with your wallet address.
 Read-only, no signature.
@@ -101,6 +117,8 @@ Open http://localhost:3000. Quotes work without any configuration. Placing Polym
 | `POLY_BUILDER_API_KEY` | Builder → API keys → Create New | No |
 | `POLY_BUILDER_SECRET` | same | No |
 | `POLY_BUILDER_PASSPHRASE` | same | No |
+| `NEXT_PUBLIC_HL_BUILDER` | Your builder address: any wallet with at least 100 USDC in Hyperliquid perps, standard mode | Yes. An address, nothing secret |
+| `NEXT_PUBLIC_HL_BUILDER_FEE_PERCENT` | Your choice, up to 1 (defaults to 0.1) | Yes |
 
 The builder secret only ever lives on the server. The browser asks `/api/polymarket/sign` to sign its
 relayer requests and never sees the secret. Never prefix those three with `NEXT_PUBLIC_`, and never commit
@@ -118,7 +136,7 @@ Early and moving fast.
 
 - Polymarket: quotes, account setup, funding, betting and My bets work.
 - Derive: quotes; betting from the app (RFQ) is next.
-- Hyperliquid: quotes; betting from the app is planned.
+- Hyperliquid: quotes, setup, funding from Arbitrum, betting and My bets work.
 - Not yet: collecting winnings from the app (links to the venue), WalletConnect for mobile wallets,
   a light theme.
 

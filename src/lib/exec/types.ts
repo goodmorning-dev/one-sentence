@@ -11,6 +11,8 @@ export interface SetupStep {
   done: boolean
   // Steps without an action are done by the user elsewhere (for example sending funds).
   runnable: boolean
+  // What the wallet will ask while this step runs, in plain words (and whether money moves).
+  prompt?: string
 }
 
 export interface VenueAccount {
@@ -37,6 +39,7 @@ export interface FundingSource {
   decimals: number
   balance: number // in the user's wallet on that chain
   min: number // venue minimum in USD
+  eta?: string // how long until it arrives, e.g. "under a minute"
 }
 
 export type FundingState = 'waiting' | 'processing' | 'done' | 'failed'
@@ -48,9 +51,10 @@ export interface Funding {
   status(id: string): Promise<FundingState>
 }
 
+// Both take the quote being bet on, so a venue can size steps to it (e.g. move only what the bet needs).
 export interface VenueSession {
-  account(): Promise<VenueAccount>
-  runStep(id: string): Promise<void>
+  account(q?: Quote): Promise<VenueAccount>
+  runStep(id: string, q?: Quote): Promise<void>
   trade(q: Quote): Promise<TradeResult>
   funding?: Funding // absent when deposits happen only on the venue's own site
 }

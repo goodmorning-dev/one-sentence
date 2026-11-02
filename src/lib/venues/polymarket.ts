@@ -1,4 +1,4 @@
-import type { Belief, Quote, Venue, VenueResult } from './types'
+import type { Belief, PolymarketTicket, Quote, Venue, VenueResult } from './types'
 
 const GAMMA = 'https://gamma-api.polymarket.com'
 export const CLOB = 'https://clob.polymarket.com'
@@ -25,7 +25,7 @@ async function quote(b: Belief): Promise<VenueResult> {
   const month = d.toLocaleString('en-US', { month: 'long', timeZone: 'UTC' }).toLowerCase()
   const slug = `${ASSET_NAMES[b.asset]}-above-on-${month}-${d.getUTCDate()}-${d.getUTCFullYear()}`
   const link = `https://polymarket.com/event/${slug}`
-  const events: GammaEvent[] = await (await fetch(`${GAMMA}/events?slug=${slug}`, { next: { revalidate: 15 } })).json()
+  const events: GammaEvent[] = await (await fetch(`${GAMMA}/events?slug=${slug}`, { cache: 'no-store' })).json()
   const event = events[0]
   if (!event || event.closed) return { venue: 'polymarket', available: false, reason: `No open "${b.asset} above" event for ${b.date}` }
 
@@ -97,7 +97,7 @@ export function fillFromBook(asks: BookLevel[], budget: number, feeRate: number)
 // Turns an estimate into the real price for its stake: what the book actually sells, the market's real odds,
 // and a price cap one tick above the last level we need, so the order fills what we quoted and no worse.
 export function priceFromBook(q: Quote, asks: BookLevel[]): VenueResult {
-  const t = q.ticket!
+  const t = q.ticket as PolymarketTicket
   const f = fillFromBook(asks, t.stake, t.feeRate)
   const unavailable = (reason: string): VenueResult => ({ venue: q.venue, available: false, reason, link: q.link })
   if (f.shares === 0) return unavailable('Nobody is selling this right now')

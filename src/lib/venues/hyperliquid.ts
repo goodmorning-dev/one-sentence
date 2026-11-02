@@ -6,12 +6,14 @@ const INFO = 'https://api.hyperliquid.xyz/info'
 const SETTLE_FEE_RATE = 0.0007
 // A YES book quoted wider than this is a placeholder (e.g. 0.002 / 0.996), not a market.
 const MAX_SPREAD = 0.3
+// Hyperliquid rejects orders worth less than this (valued at the limit price).
+const MIN_ORDER_USD = 10
 
 interface Outcome { outcome: number; name: string; description: string; venue?: string }
 interface Level { px: string; sz: string }
 
 async function info<T>(body: object): Promise<T> {
-  const r = await fetch(INFO, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), next: { revalidate: 15 } })
+  const r = await fetch(INFO, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), cache: 'no-store' })
   return r.json() as Promise<T>
 }
 
@@ -53,16 +55,24 @@ async function quote(b: Belief): Promise<VenueResult> {
   if (!m) return { venue: 'hyperliquid', available: false, reason: `No strike at or above $${b.level}${hint}`, link }
   if (!m.live) return { venue: 'hyperliquid', available: false, reason: `The $${m.strike} market has only placeholder quotes${hint}`, link }
 
-  // Walk the YES asks with the stake: real depth, unlike the top-of-book numbers of the other venues.
+  // Walk the YES asks with the stake, in whole shares (outcome sizes are integers on the book).
   let left = b.stake
   let shares = 0
+  let worst = ''
   for (const { px, sz } of m.asks) {
-    const take = Math.min(sz, left / px)
+    const take = Math.min(sz, Math.floor(left / px + 1e-9))
+    if (take <= 0) break
     shares += take
     left -= take * px
-    if (left < 1e-9) break
+    worst = String(px)
+    if (take < sz) break
   }
   const spent = b.stake - left
+  if (shares === 0) return { venue: 'hyperliquid', available: false, reason: 'Not enough on offer for this amount', link }
+  // The order is valued at its limit price; Hyperliquid rejects orders under $10.
+  if (shares * Number(worst) < MIN_ORDER_USD) {
+    return { venue: 'hyperliquid', available: false, reason: `Hyperliquid's minimum order is $${MIN_ORDER_USD}; put in a little more`, link }
+  }
 
   return {
     venue: 'hyperliquid',
@@ -80,6 +90,7 @@ async function quote(b: Belief): Promise<VenueResult> {
       ...(m.strike !== b.level ? [`Nearest strike is $${m.strike}`] : []),
       'No fee on opening, about 0.07% of the payout at settlement',
     ],
+    ticket: { venue: 'hyperliquid', asset: 100_000_000 + 10 * m.id, limitPx: worst, size: String(shares), depthChecked: true },
   }
 }
 

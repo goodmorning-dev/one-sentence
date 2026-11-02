@@ -29,7 +29,18 @@ export interface Quote {
   ticket?: Ticket
 }
 
-export type Ticket = {
+export type Ticket = PolymarketTicket | HyperliquidTicket
+
+// An immediate-or-cancel buy of whole YES shares, priced at the last book level the stake needs.
+export type HyperliquidTicket = {
+  venue: 'hyperliquid'
+  asset: number // 100_000_000 + 10 × outcome + side
+  limitPx: string // as the book prints it, so it is a valid price
+  size: string // whole shares
+  depthChecked: true
+}
+
+export type PolymarketTicket = {
   venue: 'polymarket'
   tokenId: string // YES outcome token
   maxPrice: number // worst price per share we accept

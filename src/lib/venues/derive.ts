@@ -9,7 +9,8 @@ async function rpc<T>(method: string, params: object): Promise<T> {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(params),
-    next: { revalidate: 15 },
+    // Always fresh: a revalidating cache serves its old copy first, which can be days old after a quiet spell.
+    cache: 'no-store',
   })
   const j = await r.json()
   if (j.error) throw new Error(`${method}: ${j.error.message ?? JSON.stringify(j.error)}`)
