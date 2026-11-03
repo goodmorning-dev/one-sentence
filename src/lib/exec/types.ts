@@ -40,6 +40,7 @@ export interface FundingSource {
   balance: number // in the user's wallet on that chain
   min: number // venue minimum in USD
   eta?: string // how long until it arrives, e.g. "under a minute"
+  via?: string // a hop the venue needs first, e.g. "Moved to Arbitrum first"
 }
 
 export type FundingState = 'waiting' | 'processing' | 'done' | 'failed'
@@ -47,7 +48,8 @@ export type FundingState = 'waiting' | 'processing' | 'done' | 'failed'
 export interface Funding {
   sources(): Promise<FundingSource[]>
   // Sends `amount` from the user's wallet (on the source chain) and returns an id to follow the transfer.
-  deposit(source: FundingSource, amount: number, wallet: WalletClient): Promise<string>
+  // `progress` narrates multi-transaction deposits (a bridge hop first), one line at a time.
+  deposit(source: FundingSource, amount: number, wallet: WalletClient, progress?: (text: string) => void): Promise<string>
   status(id: string): Promise<FundingState>
 }
 

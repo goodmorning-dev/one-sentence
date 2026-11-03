@@ -6,7 +6,7 @@ import type { Position } from './types'
 const INFO = 'https://api.hyperliquid.xyz/info'
 const SETTLE_FEE_RATE = 0.0007
 
-interface OutcomeSpec { outcome: number; description: string; sideSpecs: { name: string }[] }
+interface OutcomeSpec { outcome: number; name?: string; description: string; sideSpecs: { name: string }[] }
 interface Fill { coin: string; px: string; sz: string; side: 'B' | 'A'; time: number; dir: string; fee?: string }
 
 const post = <T,>(body: object): Promise<T> =>
@@ -28,6 +28,13 @@ function describe(o: OutcomeSpec): { title: string; ends: string } {
   return { title: `${asset} above $${Number(strike).toLocaleString('en-US')} on ${when}`, ends }
 }
 
+// The account may hold any HIP-4 outcome (sports, politics). We only show the kind of bet One sentence places:
+// an ETH or BTC price binary, the canonical daily or a builder-deployed one (see venues/hyperliquid.ts).
+function ours(o: OutcomeSpec) {
+  const s = spec(o.description)
+  return (s.class === 'priceBinary' || o.name?.startsWith('template:binaryPrice')) && ['ETH', 'BTC'].includes(s.underlying ?? s.perp)
+}
+
 export async function hyperliquidPositions(owner: string): Promise<Position[]> {
   const [meta, spot, fills, mids] = await Promise.all([
     post<{ outcomes: OutcomeSpec[] }>({ type: 'outcomeMeta' }),
@@ -43,7 +50,7 @@ export async function hyperliquidPositions(owner: string): Promise<Position[]> {
     .map((b): Position | null => {
       const enc = Number(b.coin.slice(1))
       const o = outcomes.get(Math.floor(enc / 10))
-      if (!o) return null
+      if (!o || !ours(o)) return null
       const shares = Number(b.total)
       const cost = Number(b.entryNtl)
       const value = shares * Number(mids[`#${enc}`] ?? 0)
@@ -76,7 +83,7 @@ export async function hyperliquidPositions(owner: string): Promise<Position[]> {
 
   // Settlement shows up as a fill with dir "Settlement" at the settle price (1 = won, 0 = lost), fee included.
   const closed = await Promise.all(
-    [...traded.entries()].slice(0, 30).map(async ([enc, fs]): Promise<Position> => {
+    [...traded.entries()].slice(0, 30).map(async ([enc, fs]): Promise<Position | null> => {
       const outcomeId = Math.floor(enc / 10)
       const amount = (f: Fill) => Number(f.px) * Number(f.sz) - Number(f.fee ?? 0)
       const bought = fs.filter((f) => f.side === 'B')
@@ -89,7 +96,8 @@ export async function hyperliquidPositions(owner: string): Promise<Position[]> {
 
       // Outcomes that settled long ago drop out of outcomeMeta; their spec is still on the settlement record.
       const o = outcomes.get(outcomeId) ?? (await post<{ spec?: OutcomeSpec } | null>({ type: 'settledOutcome', outcome: outcomeId }).catch(() => null))?.spec
-      const { title, ends } = o ? describe(o) : { title: `Outcome ${outcomeId}`, ends: new Date(fs[0].time).toISOString() }
+      if (!o || !ours(o)) return null
+      const { title, ends } = describe(o)
 
       return {
         venue: 'hyperliquid',
@@ -108,5 +116,5 @@ export async function hyperliquidPositions(owner: string): Promise<Position[]> {
     }),
   )
 
-  return [...open, ...closed]
+  return [...open, ...closed.filter((p): p is Position => p !== null)]
 }

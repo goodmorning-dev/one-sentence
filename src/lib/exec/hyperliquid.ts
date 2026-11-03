@@ -3,8 +3,10 @@ import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { arbitrum } from 'viem/chains'
 import type { AbstractWallet } from '@nktkas/hyperliquid/signing'
 import type { Quote } from '../venues/types'
+import { USDC, usdcBalance } from './balances'
 import { hyperliquidPositions } from './hyperliquid-positions'
-import type { Executor, Funding, FundingState, Position, SellQuote, SetupStep, Transfer, VenueSession, Withdrawal } from './types'
+import { bridgeToSelf } from './relay'
+import type { Executor, Funding, FundingSource, FundingState, Position, SellQuote, SetupStep, Transfer, VenueSession, Withdrawal } from './types'
 
 // Hyperliquid account model: the account IS the user's wallet address. HIP-4 outcome shares trade like spot
 // against USDC. Three one-time steps, all signed by the user's wallet on Arbitrum, none moving money:
@@ -98,23 +100,47 @@ async function open(wallet: WalletClient): Promise<VenueSession> {
   const shortfall = (q: Quote | undefined, spotFree: number) => Math.max(0, Math.ceil(((q?.cost ?? 0) - spotFree) * 100) / 100)
 
   const funding: Funding = {
+    // Arbitrum USDC goes straight in. USDC on our other chains moves to Arbitrum through Relay first (a few
+    // cents, seconds), then goes in: one flow, three wallet confirmations.
     async sources() {
-      const client = createPublicClient({ chain: arbitrum, transport: http() })
-      const raw = await client.readContract({ address: ARBITRUM_USDC, abi: erc20Abi, functionName: 'balanceOf', args: [user] }).catch(() => BigInt(0))
-      return [{ chainId: 42161, chainName: 'Arbitrum', token: ARBITRUM_USDC, symbol: 'USDC', decimals: 6, balance: Number(raw) / 1e6, min: MIN_DEPOSIT, eta: 'under a minute' }]
+      const sources = await Promise.all(
+        USDC.map(async ({ chainId, chainName, token }): Promise<FundingSource> => {
+          const direct = chainId === arbitrum.id
+          return {
+            chainId,
+            chainName,
+            token,
+            symbol: 'USDC',
+            decimals: 6,
+            balance: await usdcBalance(user, chainId, token),
+            // Relay's few cents come off before the deposit, which must still clear Hyperliquid's minimum.
+            min: direct ? MIN_DEPOSIT : MIN_DEPOSIT + 0.5,
+            eta: direct ? 'under a minute' : 'about a minute',
+            via: direct ? undefined : 'Moved to Arbitrum first',
+          }
+        }),
+      )
+      return sources.sort((x, y) => Number(y.chainId === arbitrum.id) - Number(x.chainId === arbitrum.id) || y.balance - x.balance)
     },
-    async deposit(source, amount, w) {
-      if (amount < MIN_DEPOSIT) throw new Error(`The Hyperliquid bridge needs at least $${MIN_DEPOSIT}; less would be lost`)
+    async deposit(source, amount, w, progress = () => {}) {
+      if (amount < source.min) throw new Error(`The Hyperliquid bridge needs at least $${MIN_DEPOSIT}; less would be lost`)
       const before = (await state()).total
+      let units = parseUnits(amount.toFixed(6), 6)
+      if (source.chainId !== arbitrum.id) {
+        units = await bridgeToSelf(w, source, { chainId: arbitrum.id, token: ARBITRUM_USDC }, units, progress)
+        if (units < parseUnits(String(MIN_DEPOSIT), 6)) throw new Error(`Only ${Number(units) / 1e6} USDC reached Arbitrum, under Hyperliquid's $${MIN_DEPOSIT} minimum. It's in your wallet there.`)
+        await w.switchChain({ id: arbitrum.id })
+        progress('Confirm adding it to Hyperliquid in your wallet (3 of 3)')
+      }
       await w.writeContract({
         address: ARBITRUM_USDC,
         abi: erc20Abi,
         functionName: 'transfer',
-        args: [BRIDGE, parseUnits(amount.toFixed(6), 6)],
+        args: [BRIDGE, units],
         chain: arbitrum,
         account: w.account!,
       })
-      return JSON.stringify({ before, amount })
+      return JSON.stringify({ before, amount: Number(units) / 1e6 })
     },
     // The bridge credits the sending address; we watch the account grow by the amount sent.
     async status(id): Promise<FundingState> {
@@ -165,7 +191,7 @@ async function open(wallet: WalletClient): Promise<VenueSession> {
       const funds: SetupStep = {
         id: 'funds',
         label: fresh ? 'Add money to open your account' : 'Add money',
-        detail: s.spotFree > 0 ? `${usd(s.spotFree)} available` : 'USDC from Arbitrum, arrives in under a minute',
+        detail: s.spotFree > 0 ? `${usd(s.spotFree)} available` : 'USDC from Arbitrum, Base, Optimism or Polygon',
         done: !fresh && need === 0 && s.spotFree > 0,
         runnable: false,
       }

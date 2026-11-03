@@ -8,6 +8,7 @@ import { errorChain, usd } from '@/lib/format'
 import type { VenueId } from '@/lib/venues/types'
 import { useWallet } from '@/lib/wallet'
 import { VENUE_NAMES } from './Quotes'
+import { AmountInput } from './AmountInput'
 import { Spinner } from './TradePanel'
 
 function message(e: unknown) {
@@ -18,11 +19,9 @@ function message(e: unknown) {
   return chain.length > 1 ? `${chain[chain.length - 1]} (${chain[0]})` : chain[0] ?? 'Something went wrong'
 }
 
-const field = 'rounded-xl border border-strong-line bg-bg px-3.5 text-ink outline-none focus-within:border-win/60'
-
 // Sends cash from a venue account back to the user's own wallet. Opening the venue session may ask for a
 // signature (Polymarket's sign-in); the withdrawal itself is one more (two on Hyperliquid's standard accounts).
-export function WithdrawPanel({ venue, available, onClose, onDone }: { venue: VenueId; available: number; onClose: () => void; onDone: () => void }) {
+export function WithdrawPanel({ venue, available, onDone }: { venue: VenueId; available: number; onDone: () => void }) {
   const wallet = useWallet()
   const executor = executors[venue]!
   const name = VENUE_NAMES[venue]
@@ -80,7 +79,7 @@ export function WithdrawPanel({ venue, available, onClose, onDone }: { venue: Ve
     }
   }
 
-  const box = 'mt-3 flex flex-col gap-3 rounded-2xl border border-soft-line bg-bg/50 p-4 text-sm sm:p-5'
+  const box = 'flex flex-col gap-4 text-sm'
 
   if (tracking) {
     const arrives = tracking.amount - (w?.fee ?? 0)
@@ -110,11 +109,6 @@ export function WithdrawPanel({ venue, available, onClose, onDone }: { venue: Ve
 
   return (
     <div className={box}>
-      <div className="flex items-center justify-between gap-3">
-        <h4 className="text-[15px] font-semibold text-ink">Withdraw from {name}</h4>
-        <button onClick={onClose} className="text-muted hover:text-ink">Cancel</button>
-      </div>
-
       {!w ? (
         <>
           <p className="text-muted">{usd(available)} is in your {name} account. Send it back to your own wallet.</p>
@@ -126,17 +120,12 @@ export function WithdrawPanel({ venue, available, onClose, onDone }: { venue: Ve
         <>
           <div className="flex flex-col gap-1.5">
             <label htmlFor={`wd-${venue}`} className="text-[13px] text-muted">Amount</label>
-            <div className={`${field} flex min-h-[52px] items-center gap-1`}>
-              <span className="text-lg text-faint">$</span>
-              <input
-                id={`wd-${venue}`}
-                inputMode="decimal"
-                value={amount || ''}
-                onChange={(e) => setAmount(Number(e.target.value.replace(/[^\d.]/g, '')) || 0)}
-                className="min-w-0 flex-1 bg-transparent text-lg font-medium outline-none"
-              />
-              <button onClick={() => setAmount(Math.floor(available * 100) / 100)} className="text-[13px] text-win hover:text-win-hover">All</button>
-            </div>
+            <AmountInput
+              id={`wd-${venue}`}
+              value={amount}
+              onChange={setAmount}
+              after={<button onClick={() => setAmount(Math.floor(available * 100) / 100)} className="-mr-2 min-h-11 px-2 text-[13px] text-win hover:text-win-hover">All</button>}
+            />
             {(tooLow || tooHigh) && (
               <span className="text-[13px] text-lose-ink">{tooHigh ? `Only ${usd(available)} is available` : `The minimum is ${usd(w.min)}`}</span>
             )}

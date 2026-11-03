@@ -4,12 +4,14 @@ import { useEffect, useState } from 'react'
 import { finalize } from '@/lib/compare'
 import { executors } from '@/lib/exec'
 import { refineAll } from '@/lib/exec/types'
+import type { Quote, VenueId } from '@/lib/venues/types'
 import { useBelief } from '@/lib/useBelief'
 import { usePositions } from '@/lib/usePositions'
 import { Logo, TAGLINE } from './components/Logo'
+import { BetScreen } from './components/BetScreen'
 import { MyBets } from './components/MyBets'
 import { WalletPage } from './components/WalletPage'
-import { Quotes, type QuotesData } from './components/Quotes'
+import { order, Quotes, type QuotesData } from './components/Quotes'
 import { Sentence } from './components/Sentence'
 import { WalletButton } from './components/WalletButton'
 
@@ -36,6 +38,7 @@ export default function Home() {
   const [failed, setFailed] = useState(false)
   const [updatedAt, setUpdatedAt] = useState<number | null>(null)
   const [attempt, setAttempt] = useState(0)
+  const [picked, setPicked] = useState<VenueId | null>(null)
   const { asset, level, date, stake, ready } = belief
 
   const incomplete = ready && (!(level > 0) || !(stake > 0) || !date)
@@ -64,6 +67,12 @@ export default function Home() {
     return () => { clearTimeout(t); ctrl.abort() }
   }, [asset, level, date, stake, ready, incomplete, attempt])
 
+  // The venue being bet on, while its quote still stands. Changing tabs drops it.
+  const pickedQuote = data?.results.find((r): r is Quote => r.available && r.venue === picked) ?? null
+  const better = pickedQuote && data ? order(data).find((q) => q.venue !== picked && data.comparable.includes(q.venue) && q.payoutIfRight > pickedQuote.payoutIfRight + 0.005 && !!q.ticket) ?? null : null
+  const pick = (v: VenueId | null) => { setPicked(v); scrollTo({ top: 0 }) }
+  useEffect(() => setPicked(null), [tab])
+
   const open = bets.positions?.filter((p) => p.status === 'live' || p.status === 'claimable').length ?? 0
 
   return (
@@ -88,7 +97,9 @@ export default function Home() {
       </header>
 
       <main className="mx-auto max-w-[1120px] px-4 pb-12 pt-8 sm:px-8 sm:pb-20 sm:pt-16">
-        {tab === 'bet' ? (
+        {tab === 'bet' && pickedQuote ? (
+          <BetScreen quote={pickedQuote} asset={asset} better={better} onBack={() => pick(null)} onSwitch={pick} onTraded={bets.refresh} />
+        ) : tab === 'bet' ? (
           <div className="flex flex-col gap-8 sm:gap-12">
             {ready ? <Sentence value={belief} onChange={belief.set} /> : <div className="shimmer h-48 rounded-[20px] bg-surface" />}
             <Quotes
@@ -100,7 +111,7 @@ export default function Home() {
               stake={stake}
               onRetry={() => setAttempt((n) => n + 1)}
               onTry={(patch) => belief.set(patch)}
-              onTraded={bets.refresh}
+              onPick={pick}
             />
           </div>
         ) : tab === 'bets' ? (

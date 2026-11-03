@@ -7,6 +7,7 @@ import type { Funding, FundingSource, FundingState, SetupStep, TradeResult, Venu
 import { errorChain, usd } from '@/lib/format'
 import type { Quote } from '@/lib/venues/types'
 import { useWallet } from '@/lib/wallet'
+import { AmountInput } from './AmountInput'
 
 type Run = (label: string, fn: () => Promise<void>) => Promise<boolean>
 
@@ -21,7 +22,6 @@ function message(e: unknown) {
 
 const primaryBtn =
   'min-h-[52px] rounded-[14px] bg-win px-6 text-base font-semibold text-bg transition hover:bg-win-hover disabled:cursor-default disabled:bg-track disabled:text-muted'
-const secondaryBtn = 'min-h-12 rounded-[14px] border border-strong-line px-5 text-[15px] font-medium text-ink transition hover:bg-raised disabled:opacity-50'
 const quietBtn = 'min-h-[52px] rounded-[14px] border border-line px-4 text-[15px] text-ink-2 transition hover:text-ink'
 
 const STEP_LABEL: Record<string, { todo: string; done: string }> = {
@@ -32,14 +32,11 @@ const STEP_LABEL: Record<string, { todo: string; done: string }> = {
   funds: { todo: 'Add money', done: 'Money added' },
 }
 
-// The bet flow inside a quote card: connect, open the venue account, one-time setup, add money, confirm.
+// The bet flow on its own screen: connect, open the venue account, one-time setup, add money, confirm.
 // Each wallet request gets a plain explanation of what it does and whether it moves money.
-export function TradePanel({ quote, venueName, primary, open, onOpen, onClose, onTraded }: {
+export function TradePanel({ quote, venueName, onClose, onTraded }: {
   quote: Quote
   venueName: string
-  primary: boolean
-  open: boolean
-  onOpen: () => void
   onClose: () => void
   onTraded: () => void
 }) {
@@ -65,72 +62,68 @@ export function TradePanel({ quote, venueName, primary, open, onOpen, onClose, o
     }
   }, [])
 
-  // A different wallet means a different venue account.
-  useEffect(() => {
-    session.current = null
-    setAccount(null)
-    setResult(null)
-  }, [wallet.address])
-
   // The venue sizes some steps to the bet (e.g. how much to move), so it always sees the latest quote.
   const latest = useRef(quote)
   latest.current = quote
   const refreshAccount = useCallback(async () => setAccount(await session.current!.account(latest.current)), [])
 
+  const openSession = useCallback(
+    () =>
+      run(`It’s asking you to open your ${venueName} account. Signing this doesn’t move any money.`, async () => {
+        session.current = await sessionFor(executor!, wallet.address!, () => wallet.clientOn(executor!.chainId))
+        await refreshAccount()
+      }),
+    [run, executor, wallet, venueName, refreshAccount],
+  )
+
+  // Opening the screen is the click on "Bet": open the account straight away. A different wallet means a
+  // different venue account, so start over when it changes.
+  useEffect(() => {
+    session.current = null
+    setAccount(null)
+    setResult(null)
+    if (wallet.address && executor) openSession()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wallet.address])
+
   if (!executor) return null
   const stake = usd(quote.cost, quote.cost % 1 ? 2 : 0)
+  const frame = 'flex flex-col gap-6 rounded-3xl border border-win/40 bg-surface p-5 sm:p-7'
 
-  const openSession = () =>
-    run(`Opening your ${venueName} account. If your wallet asks for a signature, it doesn’t move money.`, async () => {
-      session.current = await sessionFor(executor, wallet.address!, () => wallet.clientOn(executor.chainId))
-      await refreshAccount()
-    })
-
-  const start = async () => {
-    onOpen()
-    setResult(null)
-    if (!session.current) await openSession()
-  }
-
-  if (!open) {
+  if (!wallet.address) {
     return (
-      <>
-        {!wallet.address ? (
-          <button onClick={() => run('', wallet.connect)} disabled={!wallet.available} className={primary ? `${primaryBtn} w-full` : `${secondaryBtn} flex-1`}>
-            {wallet.available ? 'Connect wallet to bet' : 'Install a browser wallet to bet'}
+      <article aria-label="Connect" className={frame}>
+        <div className="flex flex-col gap-1.5">
+          <h1 className="text-xl font-semibold">Connect your wallet</h1>
+          <p className="text-sm leading-normal text-muted">Your wallet holds the money and approves each step. We never see your keys.</p>
+        </div>
+        {error && <p role="alert" className="text-sm text-lose-ink">{error}</p>}
+        <div className="flex items-center justify-between gap-3">
+          <button onClick={onClose} className={quietBtn}>Cancel</button>
+          <button onClick={() => run('', wallet.connect)} disabled={!wallet.available} className={primaryBtn}>
+            {wallet.available ? 'Connect wallet' : 'No wallet found'}
           </button>
-        ) : (
-          <button onClick={start} className={primary ? `${primaryBtn} w-full` : `${secondaryBtn} flex-1 whitespace-nowrap`}>
-            {/* A side card already names the venue in its header, so the short label fits beside Details. */}
-            Bet {stake}{primary ? ` on ${venueName}` : ''}
-          </button>
-        )}
-        {primary && (
-          <p className="-mt-1.5 text-center text-xs leading-normal text-faint">
-            Your money goes to {venueName}, not to us. Your wallet signs everything.
-          </p>
-        )}
-        {error && <p className="text-sm text-lose-ink">{error}</p>}
-      </>
+        </div>
+      </article>
     )
   }
 
   // Placed: the end of the flow.
   if (result?.ok) {
     return (
-      <div className="flex flex-col gap-4 border-t border-soft-line pt-5" role="status">
+      <article aria-label="Bet placed" role="status" className={frame}>
         <div className="flex items-center gap-3">
-          <span className="grid h-8 w-8 place-items-center rounded-full bg-win text-bg" aria-hidden><Check size={15} /></span>
-          <h3 className="text-lg font-semibold">You&rsquo;re in</h3>
+          <span className="grid h-9 w-9 place-items-center rounded-full bg-win text-bg" aria-hidden><Check size={16} /></span>
+          <h1 className="text-xl font-semibold">You&rsquo;re in</h1>
         </div>
-        <p className="text-sm leading-normal text-ink-2">
+        <p className="text-[15px] leading-normal text-ink-2">
           {result.message}. If you&rsquo;re right you get <span className="font-semibold text-win">{usd(quote.payoutIfRight)}</span> when it&rsquo;s decided.
         </p>
-        <div className="flex flex-wrap gap-2">
-          <a href="#bets" className={`${primaryBtn} flex flex-1 items-center justify-center no-underline`}>See it in My bets</a>
+        <div className="flex items-center justify-between gap-3">
           <button onClick={onClose} className={quietBtn}>Done</button>
+          <a href="#bets" className={`${primaryBtn} flex items-center justify-center no-underline`}>See it in My bets</a>
         </div>
-      </div>
+      </article>
     )
   }
 
@@ -139,6 +132,7 @@ export function TradePanel({ quote, venueName, primary, open, onOpen, onClose, o
   const enough = account?.balance != null && account.balance >= quote.cost
   const ready = !!account && !current && enough
   const fundingNeeded = !!account && (current?.id === 'funds' || (!current && !enough))
+  const at = current ? steps.indexOf(current) : steps.length
 
   const runStep = (step: SetupStep) =>
     run(step.prompt ?? `It’s asking you to let ${venueName} place bets for this account. This doesn’t move money.`, async () => {
@@ -155,32 +149,48 @@ export function TradePanel({ quote, venueName, primary, open, onOpen, onClose, o
       onTraded()
     })
 
-  return (
-    <div className="flex flex-col gap-5 sm:gap-6 sm:border-t sm:border-soft-line sm:pt-6">
-      <div className="flex flex-col gap-6 sm:flex-row sm:flex-wrap sm:gap-8">
-        <div className="flex flex-col gap-1 sm:flex-[1_1_260px] sm:gap-1.5">
-          <h3 className="text-lg font-semibold tracking-[-0.01em]">{ready ? 'Ready to place your bet' : `Set up your ${venueName} account`}</h3>
-          <p className="text-sm leading-normal text-muted">
-            {ready
-              ? `${stake} goes from your ${venueName} account. If you’re right you get ${usd(quote.payoutIfRight)}.`
-              : `One time only. Each step asks your wallet to approve. Your ${stake} goes to ${venueName}, not to us.`}
-          </p>
-        </div>
+  const hint = !current ? null : current.id === 'funds' ? `Move ${stake} to your ${venueName} account below.` : current.detail
 
-        <ol aria-label="Setup steps" className="flex flex-col sm:flex-[1_1_320px]">
-          {steps.map((s, i) => (
-            <Step
-              key={s.id}
-              step={s}
-              n={i + 1}
-              last={i === steps.length - 1}
-              current={s === current}
-              busy={s === current ? busy : null}
-              hint={s.id === 'funds' && !s.done ? `Next · move ${stake} to your ${venueName} account` : undefined}
-            />
-          ))}
-        </ol>
+  return (
+    <article aria-label="Setup" className={frame}>
+      <div className="flex flex-col gap-1.5">
+        <h1 className="text-xl font-semibold">{ready ? 'Ready to place your bet' : `Set up your ${venueName} account`}</h1>
+        <p className="text-sm leading-normal text-muted">
+          {ready
+            ? `${stake} goes from your ${venueName} account. If you’re right you get ${usd(quote.payoutIfRight)}.`
+            : `One time only. Your wallet approves each step. Your ${stake} goes to ${venueName}, not to us.`}
+        </p>
       </div>
+
+      {!ready && (
+        <ol aria-label={`Step ${Math.min(at + 1, steps.length)} of ${steps.length}`} className="grid gap-2" style={{ gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))` }}>
+          {steps.map((s, i) => {
+            const label = STEP_LABEL[s.id] ?? { todo: s.label, done: s.label }
+            const now = s === current
+            return (
+              <li key={s.id} aria-current={now ? 'step' : undefined} className="flex min-w-0 flex-col gap-2.5">
+                <span className={`h-1 rounded-full ${s.done || now ? 'bg-win' : 'bg-track'}`} />
+                <span className={`items-center gap-2 text-[13px] sm:flex sm:text-sm ${now ? 'flex font-medium text-ink' : 'hidden text-muted'}`}>
+                  {now && busy ? <Spinner /> : s.done ? <span className="text-win"><Check size={13} /></span> : null}
+                  <span className="truncate sm:whitespace-normal">{s.done ? label.done : `${i + 1} · ${label.todo}`}</span>
+                </span>
+              </li>
+            )
+          })}
+        </ol>
+      )}
+
+      {busy ? (
+        <div aria-busy className="flex items-start gap-3.5 rounded-2xl bg-raised px-5 py-[18px]">
+          <WalletIcon />
+          <div className="flex flex-col gap-1">
+            <span className="text-[15px] font-medium">Check your wallet</span>
+            <span className="text-sm leading-normal text-muted">{busy}</span>
+          </div>
+        </div>
+      ) : hint && !fundingNeeded ? (
+        <p className="-mt-2 text-sm leading-normal text-muted">{hint}</p>
+      ) : null}
 
       {fundingNeeded && session.current?.funding && (
         <FundingForm
@@ -200,52 +210,27 @@ export function TradePanel({ quote, venueName, primary, open, onOpen, onClose, o
         </div>
       )}
 
-      <div className="flex flex-wrap justify-end gap-2">
-        <div className="order-2 flex flex-1 sm:order-none sm:flex-none">
-          <button onClick={onClose} className={`${quietBtn} w-full`}>Cancel</button>
-        </div>
+      <div className="flex items-center justify-between gap-3">
+        <button onClick={onClose} className={quietBtn}>Cancel</button>
         {busy ? (
-          <button disabled className={`${primaryBtn} flex-[2_1_auto] sm:flex-none`}>Waiting for your wallet…</button>
+          <button disabled className={primaryBtn}>Waiting for your wallet…</button>
         ) : !account ? (
-          <button onClick={openSession} className={`${primaryBtn} flex-[2_1_auto] sm:flex-none`}>{error ? 'Try again' : 'Open account'}</button>
+          <button onClick={openSession} className={primaryBtn}>{error ? 'Try again' : 'Open account'}</button>
         ) : current?.runnable ? (
-          <button onClick={() => runStep(current)} className={`${primaryBtn} flex-[2_1_auto] sm:flex-none`}>{STEP_LABEL[current.id]?.todo ?? current.label}</button>
+          <button onClick={() => runStep(current)} className={primaryBtn}>{STEP_LABEL[current.id]?.todo ?? current.label}</button>
         ) : ready ? (
-          <button onClick={trade} className={`${primaryBtn} flex-[2_1_auto] sm:flex-none`}>Confirm bet · {stake}</button>
+          <button onClick={trade} className={primaryBtn}>Confirm bet · {stake}</button>
         ) : null}
       </div>
-    </div>
+    </article>
   )
 }
 
-function Step({ step, n, last, current, busy, hint }: { step: SetupStep; n: number; last: boolean; current: boolean; busy: string | null; hint?: string }) {
-  const label = STEP_LABEL[step.id] ?? { todo: step.label, done: step.label }
+function WalletIcon() {
   return (
-    <li aria-current={current ? 'step' : undefined} className={`flex gap-3.5 ${last ? '' : 'pb-4'}`}>
-      <div className="flex flex-col items-center gap-1">
-        {step.done ? (
-          <span className="grid h-7 w-7 place-items-center rounded-full bg-win text-bg" aria-hidden><Check size={14} /></span>
-        ) : current ? (
-          <span className="grid h-7 w-7 place-items-center rounded-full border-2 border-win" aria-hidden>
-            {busy ? <Spinner /> : <span className="h-2 w-2 rounded-full bg-win" />}
-          </span>
-        ) : (
-          <span className="grid h-7 w-7 place-items-center rounded-full border-2 border-strong-line text-xs text-faint" aria-hidden>{n}</span>
-        )}
-        {!last && <span className={`min-h-5 w-0.5 flex-1 ${step.done ? 'bg-win' : 'bg-track'}`} />}
-      </div>
-      <div className="flex flex-1 flex-col gap-2 pt-[3px]" aria-busy={!!busy}>
-        <span className={`text-[15px] font-medium ${step.done || current ? 'text-ink' : 'text-ink-2'}`}>{step.done ? label.done : label.todo}</span>
-        {busy ? (
-          <div className="flex flex-col gap-1 rounded-xl bg-raised px-3.5 py-3">
-            <span className="text-sm text-ink">Check your wallet</span>
-            <span className="text-[13px] leading-normal text-muted">{busy}</span>
-          </div>
-        ) : (
-          <span className="-mt-1.5 text-[13px] text-faint">{step.done ? 'Done · approved in your wallet' : hint}</span>
-        )}
-      </div>
-    </li>
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="mt-px flex-none text-win">
+      <rect x="3" y="6" width="18" height="13" rx="3" /><path d="M16 12.5h2M3 9h15a3 3 0 0 0-3-3" />
+    </svg>
   )
 }
 
@@ -260,7 +245,8 @@ export function Spinner() {
 const PROGRESS: Record<FundingState, number> = { waiting: 20, processing: 60, done: 100, failed: 100 }
 
 // Deposit from the user's own wallet on any supported chain. The venue converts it and credits their account.
-export function FundingForm({ venueName, funding, suggested, busy, run, onArrived }: {
+export function FundingForm({ venueName, funding, suggested, busy, run, onArrived, bare = false }: {
+  bare?: boolean // inside a dialog that already frames and titles it
   venueName: string
   funding: Funding
   suggested: number
@@ -274,6 +260,7 @@ export function FundingForm({ venueName, funding, suggested, busy, run, onArrive
   const [amount, setAmount] = useState(Math.max(Math.ceil(suggested), 1))
   const [tracking, setTracking] = useState<{ id: string; from: string; amount: number } | null>(null)
   const [state, setState] = useState<FundingState | null>(null)
+  const [progress, setProgress] = useState<string | null>(null)
 
   useEffect(() => {
     funding.sources().then(setSources, () => setSources([]))
@@ -294,7 +281,7 @@ export function FundingForm({ venueName, funding, suggested, busy, run, onArrive
 
   const funded = sources?.filter((s) => s.balance > 0) ?? []
   const source = funded[pick]
-  const box = 'flex flex-col gap-4 rounded-2xl border border-soft-line bg-bg/40 p-4 sm:p-5'
+  const box = bare ? 'flex flex-col gap-4' : 'flex flex-col gap-4 rounded-2xl border border-soft-line bg-bg/40 p-4 sm:p-5'
 
   if (tracking) {
     const s = state ?? 'waiting'
@@ -331,7 +318,7 @@ export function FundingForm({ venueName, funding, suggested, busy, run, onArrive
   if (!source) {
     return (
       <div className={box}>
-        <h4 className="text-lg font-semibold">Add money to {venueName}</h4>
+        {!bare && <h4 className="text-lg font-semibold">Add money to {venueName}</h4>}
         <p className="text-sm leading-normal text-muted">
           This wallet has no USDC on {[...new Set(sources.map((s) => s.chainName))].join(', ').replace(/, ([^,]*)$/, ' or $1')}.
           Add some there, then come back.
@@ -341,33 +328,32 @@ export function FundingForm({ venueName, funding, suggested, busy, run, onArrive
   }
 
   const deposit = () =>
-    run(`Approve sending ${usd(amount)} from ${source.chainName}. It goes to your own ${venueName} account.`, async () => {
-      const client = await wallet.clientOn(source.chainId)
-      const id = await funding.deposit(source, amount, client)
-      setTracking({ id, from: source.chainName, amount })
-      setState('waiting')
-    })
+    run(
+      source.via
+        ? `${source.via}, then into your own ${venueName} account. Your wallet asks three times; keep this page open.`
+        : `Approve sending ${usd(amount)} from ${source.chainName}. It goes to your own ${venueName} account.`,
+      async () => {
+        try {
+          const client = await wallet.clientOn(source.chainId)
+          const id = await funding.deposit(source, amount, client, setProgress)
+          setTracking({ id, from: source.chainName, amount })
+          setState('waiting')
+        } finally {
+          setProgress(null)
+        }
+      },
+    )
 
   const tooLow = amount < source.min
   const tooHigh = amount > source.balance
 
   return (
     <div className={box}>
-      <h4 className="text-lg font-semibold">Add money to {venueName}</h4>
+      {!bare && <h4 className="text-lg font-semibold">Add money to {venueName}</h4>}
 
       <div className="flex flex-col gap-1.5">
         <label htmlFor="deposit-amount" className="text-[13px] text-muted">Amount</label>
-        <div className="flex min-h-[52px] items-center gap-1 rounded-xl border border-strong-line bg-bg px-3.5 focus-within:border-win/60">
-          <span className="text-xl text-faint">$</span>
-          <input
-            id="deposit-amount"
-            inputMode="decimal"
-            value={amount || ''}
-            onChange={(e) => setAmount(Number(e.target.value.replace(/[^\d.]/g, '')) || 0)}
-            className="min-w-0 flex-1 bg-transparent text-xl font-medium text-ink outline-none"
-          />
-          <span className="text-[13px] text-faint">You have {usd(source.balance)}</span>
-        </div>
+        <AmountInput id="deposit-amount" value={amount} onChange={setAmount} after={<span className="text-[13px] text-faint">You have {usd(source.balance)}</span>} />
         {(tooLow || tooHigh) && (
           <span className="text-[13px] text-lose-ink">{tooLow ? `The minimum from ${source.chainName} is ${usd(source.min)}` : 'That’s more than this wallet has there'}</span>
         )}
@@ -388,6 +374,7 @@ export function FundingForm({ venueName, funding, suggested, busy, run, onArrive
             >
               <span className="font-medium text-ink">{s.chainName}{s.symbol !== 'USDC' ? ` · ${s.symbol}` : ''}</span>
               <span className="text-xs text-muted">{usd(s.balance)} · {s.eta ?? '~3 min'}</span>
+              {s.via && <span className="text-xs text-faint">{s.via}</span>}
             </button>
           ))}
         </div>
@@ -398,9 +385,18 @@ export function FundingForm({ venueName, funding, suggested, busy, run, onArrive
         The money goes straight from your wallet to your {venueName} account. We never hold it.
       </p>
 
+      {source.via && !progress && (
+        <p className="text-[13px] leading-normal text-muted">
+          {venueName} only takes USDC from Arbitrum, so we move it there first through Relay (a few cents, seconds), then add it. You confirm three times in your wallet.
+        </p>
+      )}
+
       <button onClick={deposit} disabled={busy || tooLow || tooHigh} className={primaryBtn}>
         Add {usd(amount)} from {source.chainName}
       </button>
+      {progress && (
+        <p role="status" className="flex items-center gap-2 rounded-xl bg-raised px-3.5 py-3 text-sm text-ink"><Spinner />{progress}</p>
+      )}
     </div>
   )
 }

@@ -140,16 +140,17 @@ export async function polymarketCash(owner: string): Promise<number> {
 
 // Withdrawal addresses are new every time, so the bridge can't list them back: we remember the ones made here.
 const withdrawalsKey = (owner: string) => `pm-withdrawals:${owner.toLowerCase()}`
+// Lower-cased and unique: the same address saved twice (once checksummed) would list its transfers twice.
 function rememberedWithdrawals(owner: string): string[] {
   try {
-    return JSON.parse(localStorage.getItem(withdrawalsKey(owner)) ?? '[]')
+    return [...new Set((JSON.parse(localStorage.getItem(withdrawalsKey(owner)) ?? '[]') as string[]).map((a) => a.toLowerCase()))]
   } catch {
     return []
   }
 }
 export function rememberWithdrawal(owner: string, bridgeAddress: string) {
   try {
-    localStorage.setItem(withdrawalsKey(owner), JSON.stringify([...new Set([bridgeAddress, ...rememberedWithdrawals(owner)])].slice(0, 50)))
+    localStorage.setItem(withdrawalsKey(owner), JSON.stringify([...new Set([bridgeAddress.toLowerCase(), ...rememberedWithdrawals(owner)])].slice(0, 50)))
   } catch {}
 }
 
@@ -195,8 +196,10 @@ export async function polymarketHistory(owner: string): Promise<Transfer[]> {
   }).then((r) => r.json())
   const [deposits, ...withdrawals] = await Promise.all([dep.address?.evm ? status(dep.address.evm) : [], ...rememberedWithdrawals(owner).map(status)])
 
-  return [
+  const all = [
     ...oneLegEach(deposits, (t) => t.fromChainId).map(toTransfer('deposit', (t) => t.fromChainId)),
     ...withdrawals.flatMap((w) => oneLegEach(w, (t) => t.toChainId).map(toTransfer('withdrawal', (t) => t.toChainId))),
   ]
+  // One transfer can still be reported under two addresses; keep it once.
+  return [...new Map(all.map((t) => [t.id, t])).values()]
 }

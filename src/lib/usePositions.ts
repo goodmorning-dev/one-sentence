@@ -6,6 +6,16 @@ import type { Position, Transfer } from './exec/types'
 import type { VenueId } from './venues/types'
 import { useWallet } from './wallet'
 
+const NAMES: Record<VenueId, string> = { polymarket: 'Polymarket', hyperliquid: 'Hyperliquid', derive: 'Derive' }
+
+// Polymarket is blocked by some countries' internet providers (Bulgaria's among them): the browser's request
+// fails before reaching it. Say which venue is missing and the likely cause, not just "some venues".
+function unreachable(failed: (VenueId | null)[], what: 'bets' | 'history') {
+  const names = failed.filter((v): v is VenueId => !!v).map((v) => NAMES[v])
+  if (!names.length) return null
+  return `Couldn’t reach ${names.join(' or ')} from your network, so your ${names.join(' and ')} ${what} ${what === 'bets' ? 'are' : 'is'} missing. Some internet providers block ${names.length > 1 ? 'these sites' : 'it'}; a VPN usually fixes this.`
+}
+
 export type Cash = Partial<Record<VenueId, number>>
 
 // Everything the connected wallet holds across venues: positions, the cash in each venue account, and the
@@ -30,11 +40,10 @@ export function usePositions() {
       Promise.allSettled(list.map((e) => (e!.history ? e!.history(address) : Promise.resolve([])))),
     ])
     setHistory(moves.flatMap((r) => (r.status === 'fulfilled' ? r.value : [])).sort((a, b) => b.time - a.time))
-    setHistoryError(moves.some((r) => r.status === 'rejected') ? 'Some venues could not be reached; their history is missing.' : null)
+    setHistoryError(unreachable(moves.map((r, i) => (r.status === 'rejected' ? list[i]!.venue : null)), 'history'))
     setPositions(results.flatMap((r) => (r.status === 'fulfilled' ? r.value : [])))
     setCash(Object.fromEntries(balances.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []))))
-    const failed = results.filter((r) => r.status === 'rejected')
-    setError(failed.length ? 'Some venues could not be reached; their bets are missing.' : null)
+    setError(unreachable(results.map((r, i) => (r.status === 'rejected' ? list[i]!.venue : null)), 'bets'))
     setLoading(false)
   }, [address])
 

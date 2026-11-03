@@ -29,14 +29,12 @@ export function WalletButton({ big = false }: { big?: boolean }) {
   }
 
   return (
-    <button
-      onClick={wallet.disconnect}
-      title="Disconnect"
-      className="group flex min-h-11 items-center gap-2 whitespace-nowrap rounded-full border border-line bg-surface px-[14px] text-sm font-medium text-ink transition hover:bg-raised"
+    <a
+      href="#wallet"
+      className="flex min-h-11 items-center gap-2 whitespace-nowrap rounded-full border border-line bg-surface px-4 text-sm font-medium text-ink no-underline transition hover:bg-raised"
     >
       <span className="h-2 w-2 rounded-full bg-win" aria-hidden />
-      <span className="group-hover:hidden">{short(wallet.address)}</span>
-      <span className="hidden group-hover:inline">Disconnect</span>
-    </button>
+      {short(wallet.address)}
+    </a>
   )
 }
