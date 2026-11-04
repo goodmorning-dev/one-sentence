@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { Asset, VenueId } from '@/lib/venues/types'
 
 export interface StrikeLine {
@@ -47,17 +47,19 @@ export function PriceChart({ asset, spot, settles, lines, highlight }: {
   lines: StrikeLine[]
   highlight: VenueId | null
 }) {
-  const box = useRef<HTMLDivElement>(null)
+  // The element itself is state, so the width is watched on whichever node React renders, and it's measured
+  // directly as well: an observer that only ever reported 0 left the chart blank with the data already in.
+  const [box, setBox] = useState<HTMLElement | null>(null)
   const [w, setW] = useState(0)
   const points = useCandles(asset)
 
   useEffect(() => {
-    const el = box.current
-    if (!el) return
-    const ro = new ResizeObserver(([e]) => setW(e.contentRect.width))
-    ro.observe(el)
+    if (!box) return
+    setW(box.getBoundingClientRect().width)
+    const ro = new ResizeObserver(([e]) => setW(e.contentRect.width || box.getBoundingClientRect().width))
+    ro.observe(box)
     return () => ro.disconnect()
-  }, [])
+  }, [box, points])
 
   const ready = points && points.length > 1 && w > 0
   const now = Date.now()
@@ -84,7 +86,7 @@ export function PriceChart({ asset, spot, settles, lines, highlight }: {
   const decided = new Date(end).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
 
   return (
-    <figure ref={box} className="relative m-0 border-b border-chip" aria-label={`${asset} price over the last ${HOURS} hours against each bet’s price`}>
+    <figure ref={setBox} className="relative m-0 border-b border-chip" aria-label={`${asset} price over the last ${HOURS} hours against each bet’s price`}>
       {!ready ? (
         <div className={`h-[232px] ${points ? '' : 'shimmer'} grid place-items-center text-sm text-faint`}>{points ? 'Price history isn’t available right now' : ''}</div>
       ) : (
