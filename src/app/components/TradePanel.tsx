@@ -117,8 +117,13 @@ export function TradePanel({ quote, venueName, onClose, onTraded }: {
           <h1 className="text-xl font-semibold">You&rsquo;re in</h1>
         </div>
         <p className="text-[15px] leading-normal text-ink-2">
-          {result.message}. If you&rsquo;re right you get <span className="font-semibold text-win">{usd(quote.payoutIfRight)}</span> when it&rsquo;s decided.
+          {result.message}. If you&rsquo;re right you get <span className="font-semibold text-win">{usd(result.filled?.payout ?? quote.payoutIfRight)}</span> when it&rsquo;s decided.
         </p>
+        {result.filled && result.filled.spent < quote.cost - 0.01 && (
+          <p className="text-sm leading-normal text-muted">
+            Only {usd(result.filled.spent)} of your {usd(quote.cost)} could be placed at this price. The rest stays in your {venueName} account.
+          </p>
+        )}
         <div className="flex items-center justify-between gap-3">
           <button onClick={onClose} className={quietBtn}>Done</button>
           <a href="#bets" className={`${primaryBtn} flex items-center justify-center no-underline`}>See it in My bets</a>
@@ -145,8 +150,8 @@ export function TradePanel({ quote, venueName, onClose, onTraded }: {
       const r = await session.current!.trade(quote)
       if (!r.ok) throw new Error(r.message)
       setResult(r)
-      await refreshAccount()
       onTraded()
+      await refreshAccount().catch(() => {})
     })
 
   const hint = !current ? null : current.id === 'funds' ? `Move ${stake} to your ${venueName} account below.` : current.detail
@@ -273,8 +278,8 @@ export function FundingForm({ venueName, funding, suggested, busy, run, onArrive
       const s = await funding.status(tracking.id).catch(() => null)
       if (!s) return
       setState(s)
-      if (s === 'done') await onArrived()
       if (s === 'done' || s === 'failed') clearInterval(t)
+      if (s === 'done') await onArrived().catch(() => {})
     }, 15000)
     return () => clearInterval(t)
   }, [tracking, funding, onArrived])

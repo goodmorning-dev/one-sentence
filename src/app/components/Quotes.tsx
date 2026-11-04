@@ -239,7 +239,9 @@ function QuoteRow({ q, best, primary, other, stake, onPick, onHover }: {
           <span className="text-[17px] font-semibold">{name}</span>
           {badge}
           <span className={`basis-full text-[13px] md:basis-auto ${other ? 'text-live-ink' : 'text-faint'}`}>
-            {other ? 'Other price: ' : 'Wins '}above {usd(q.actualLevel, q.actualLevel % 1 ? 2 : 0)}
+            {q.partialFrom != null
+              ? `${other ? 'Other price: f' : 'F'}ull win above ${usd(q.actualLevel, q.actualLevel % 1 ? 2 : 0)}, part from ${usd(q.partialFrom, q.partialFrom % 1 ? 2 : 0)}`
+              : `${other ? 'Other price: ' : 'Wins '}above ${usd(q.actualLevel, q.actualLevel % 1 ? 2 : 0)}`}
           </span>
         </span>
       </div>
@@ -251,7 +253,9 @@ function QuoteRow({ q, best, primary, other, stake, onPick, onHover }: {
       <div className="flex flex-col gap-0.5">
         <span className="text-[13px] text-muted md:hidden">If you&rsquo;re wrong</span>
         <span className={`${figure} font-semibold tracking-[-0.02em] text-lose`}>−{cost}</span>
-        <span className="text-[13px] text-faint">you lose what you put in</span>
+        <span className="text-[13px] text-faint">
+          {q.partialFrom != null ? `all of it below ${usd(q.partialFrom, q.partialFrom % 1 ? 2 : 0)}` : 'you lose what you put in'}
+        </span>
       </div>
       <div className="col-span-2 flex flex-col gap-2 md:col-span-1">
         <span className="flex justify-between gap-3 text-[15px] md:font-medium">
@@ -261,6 +265,11 @@ function QuoteRow({ q, best, primary, other, stake, onPick, onHover }: {
         <div role="img" aria-label={`Chance it happens: ${chanceLabel(q.impliedChance)}`} className="h-1.5 rounded-full bg-track">
           <div className={`h-1.5 min-w-1.5 rounded-full ${best ? 'bg-win' : 'bg-muted'}`} style={{ width: `${q.impliedChance * 100}%` }} />
         </div>
+        {q.partialFrom != null && (
+          <span className="text-xs leading-snug text-faint">
+            Of ending around {usd((q.partialFrom + q.actualLevel) / 2, 0)}. A full win is a little less likely.
+          </span>
+        )}
       </div>
       <div className="col-span-2 flex flex-col gap-1.5 md:col-span-1">
         {tradable ? (
@@ -375,9 +384,9 @@ function LiveStamp({ at, loading, className = '' }: { at: number | null; loading
   if (!at) return null
   const s = Math.max(0, Math.round((now - at) / 1000))
   return (
-    <span className={`flex items-center gap-1.5 text-xs text-faint ${className}`} aria-live="polite">
-      <span className={`h-1.5 w-1.5 rounded-full bg-win ${loading ? 'shimmer' : ''}`} aria-hidden />
-      {loading ? 'Updating…' : `Live prices · ${s < 60 ? `${s}s` : `${Math.round(s / 60)}m`} ago`}
+    <span className={`flex items-center gap-1.5 text-xs text-faint ${className}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${s < 60 ? 'bg-win' : 'bg-faint'} ${loading ? 'shimmer' : ''}`} aria-hidden />
+      {loading ? 'Updating…' : s < 60 ? `Live prices · ${s}s ago` : `Prices from ${Math.round(s / 60)}m ago`}
     </span>
   )
 }

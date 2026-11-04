@@ -21,10 +21,23 @@ async function open(wallet: WalletClient): Promise<VenueSession> {
     apiKey: remoteBuilderSigning({ url: '/api/polymarket/sign' }),
   })
   const address = client.account.wallet
+  // Wallets only sign typed data for the chain they're on, and a deposit from Base or a Hyperliquid step may have
+  // moved this one away from Polygon since the session opened. Every signed action goes through here first.
+  async function onPolygon() {
+    if ((await wallet.getChainId()) !== 137) await wallet.switchChain({ id: 137 })
+  }
   const funding = polymarketFunding(address, client.account.signer)
   // pUSD leaves the account through its own gasless transfer, signed by the user's wallet.
   const withdrawal = polymarketWithdrawal(address, client.account.signer, async (to, amount) => {
-    await (await client.transferErc20({ tokenAddress: PUSD, recipientAddress: to, amount })).wait()
+    await onPolygon()
+    const tx = await client.transferErc20({ tokenAddress: PUSD, recipientAddress: to, amount })
+    // Once the relayer has it, the transfer is on its way: a slow confirmation must not read as "nothing moved",
+    // or a retry would send it twice. The bridge status tracks it from here.
+    try {
+      await tx.wait()
+    } catch (e) {
+      if (!/time/i.test((e as Error).message)) throw e
+    }
   })
 
   return {
@@ -56,11 +69,15 @@ async function open(wallet: WalletClient): Promise<VenueSession> {
     },
 
     async runStep(id) {
-      if (id === 'approvals') await client.setupTradingApprovals()
+      if (id === 'approvals') {
+        await onPolygon()
+        await client.setupTradingApprovals()
+      }
     },
 
     // Market sell, filling only at or above the quoted limit, with our builder code for attribution.
     async sell(p, q) {
+      await onPolygon()
       const r = await client.placeMarketOrder({
         assetId: p.id,
         side: OrderSide.SELL,
@@ -79,6 +96,7 @@ async function open(wallet: WalletClient): Promise<VenueSession> {
       if (q.ticket?.venue !== 'polymarket') return { ok: false, message: 'This quote cannot be traded here' }
       if (!q.ticket.depthChecked) return { ok: false, message: 'This price hasn’t been checked against the order book yet' }
       // Market buy: spend at most the stake (fees included), never above maxPrice, fill what we can and cancel the rest.
+      await onPolygon()
       const r = await client.placeMarketOrder({
         assetId: q.ticket.tokenId,
         side: OrderSide.BUY,
@@ -89,11 +107,12 @@ async function open(wallet: WalletClient): Promise<VenueSession> {
       })
       if (!r.ok) return { ok: false, message: r.message }
       const shares = Number(r.takingAmount)
+      const spent = Number(r.makingAmount)
+      if (!(shares > 0)) return { ok: false, message: 'Nothing was bought at this price; the offers moved. No money was spent. Try again.' }
       return {
         ok: true,
-        message: shares > 0
-          ? `Bought ${shares.toFixed(2)} YES for $${Number(r.makingAmount).toFixed(2)}`
-          : `Order ${r.status}, nothing filled yet`,
+        message: `Bought ${shares.toFixed(2)} YES for $${spent.toFixed(2)}`,
+        filled: { spent, payout: shares },
         link: 'https://polymarket.com/portfolio',
       }
     },

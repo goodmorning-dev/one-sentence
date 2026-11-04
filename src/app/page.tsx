@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { finalize } from '@/lib/compare'
 import { executors } from '@/lib/exec'
 import { refineAll } from '@/lib/exec/types'
@@ -45,10 +45,25 @@ export default function Home() {
 
   const incomplete = ready && (!(level > 0) || !(stake > 0) || !date)
 
+  // Prices re-read every 30s while the list is on screen and the tab is visible. Not during a bet: the bet screen
+  // keeps the quote it opened with (its order carries a price limit, so it never fills worse than shown), and
+  // swapping it mid-flow could pull the screen away while the wallet is asking.
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    if (picked || tab !== 'bet') return
+    const t = setInterval(() => !document.hidden && setTick((x) => x + 1), 30_000)
+    return () => clearInterval(t)
+  }, [picked, tab])
+
+  // Which sentence the quotes on screen belong to, so a refresh of the same sentence happens quietly.
+  const shown = useRef('')
+
   useEffect(() => {
     if (!ready || incomplete) return setLoading(false)
-    // Mark quotes stale the moment the sentence changes, so nobody can bet on the previous numbers.
-    setLoading(true)
+    const key = `${asset}|${level}|${date}|${stake}|${attempt}`
+    const background = shown.current === key
+    // A new sentence marks the quotes stale at once, so nobody can bet on the previous numbers.
+    if (!background) setLoading(true)
     const ctrl = new AbortController()
     const t = setTimeout(async () => {
       try {
@@ -57,22 +72,28 @@ export default function Home() {
         const body: QuotesData = await r.json()
         const results = await refineAll(body.results, executors)
         if (ctrl.signal.aborted) return
-        setData(finalize(results, level))
+        setData(finalize(results, level, stake))
+        shown.current = key
         setFailed(false)
         setUpdatedAt(Date.now())
       } catch (e) {
-        if ((e as Error).name !== 'AbortError') setFailed(true)
+        if ((e as Error).name === 'AbortError') return
+        // Never leave numbers on screen we couldn't confirm: they'd be for an old sentence, or out of date.
+        setData(null)
+        shown.current = ''
+        setFailed(true)
       } finally {
         if (!ctrl.signal.aborted) setLoading(false)
       }
-    }, 400)
+    }, background ? 0 : 400)
     return () => { clearTimeout(t); ctrl.abort() }
-  }, [asset, level, date, stake, ready, incomplete, attempt])
+  }, [asset, level, date, stake, ready, incomplete, attempt, tick])
 
   // The venue being bet on, while its quote still stands. Changing tabs drops it.
   const pickedQuote = data?.results.find((r): r is Quote => r.available && r.venue === picked) ?? null
   const better = pickedQuote && data ? order(data).find((q) => q.venue !== picked && data.comparable.includes(q.venue) && q.payoutIfRight > pickedQuote.payoutIfRight + 0.005 && !!q.ticket) ?? null : null
-  const pick = (v: VenueId | null) => { setPicked(v); scrollTo({ top: 0 }) }
+  // Back from a bet, the list re-reads prices straight away.
+  const pick = (v: VenueId | null) => { setPicked(v); if (!v) setTick((x) => x + 1); scrollTo({ top: 0 }) }
   useEffect(() => setPicked(null), [tab])
 
   const open = bets.positions?.filter((p) => p.status === 'live' || p.status === 'claimable').length ?? 0

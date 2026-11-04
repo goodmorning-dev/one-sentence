@@ -384,7 +384,7 @@ function SpotLine({ asset, level, spot }: { asset: Asset; level: number; spot: n
   const pct = `${Math.abs(gap * 100).toFixed(1)}%`
   const now = spot.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: spot < 1000 ? 2 : 0 })
   return (
-    <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[15px] leading-normal text-muted" aria-live="polite">
+    <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[15px] leading-normal text-muted">
       <span className="inline-flex items-center gap-2 text-ink">
         <span className="h-1.5 w-1.5 rounded-full bg-win" aria-hidden />
         {asset} is {now} now.

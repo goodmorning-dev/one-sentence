@@ -9,6 +9,13 @@ const VENUES = [derive, polymarket, hyperliquid]
 const ASSETS: Asset[] = ['ETH', 'BTC']
 const NEARBY = 0.03 // how far below the sentence's price an alternative may be
 
+// A calendar date that exists (no 31 February) and isn't before today in UTC, where every venue's day is counted.
+function realDate(d: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return false
+  const t = new Date(`${d}T00:00:00Z`)
+  return !isNaN(t.getTime()) && t.toISOString().slice(0, 10) === d && d >= new Date().toISOString().slice(0, 10)
+}
+
 // GET /api/quotes?asset=ETH&level=2400&date=2026-10-30&stake=100
 export async function GET(req: Request) {
   const q = new URL(req.url).searchParams
@@ -19,8 +26,8 @@ export async function GET(req: Request) {
     date: q.get('date') ?? '',
     stake: Number(q.get('stake') ?? 100),
   }
-  if (!ASSETS.includes(belief.asset) || !(belief.level > 0) || !/^\d{4}-\d{2}-\d{2}$/.test(belief.date) || !(belief.stake > 0)) {
-    return NextResponse.json({ error: 'Expected asset (ETH|BTC), level > 0, date YYYY-MM-DD, stake > 0' }, { status: 400 })
+  if (!ASSETS.includes(belief.asset) || !(belief.level > 0) || !realDate(belief.date) || !(belief.stake > 0)) {
+    return NextResponse.json({ error: 'Expected asset (ETH|BTC), level > 0, a real date YYYY-MM-DD from today on, stake > 0' }, { status: 400 })
   }
 
   const ask = (v: Venue, b: Belief) => v.quote(b).catch((e: Error): VenueResult => ({ venue: v.id, available: false, reason: e.message }))
@@ -35,5 +42,5 @@ export async function GET(req: Request) {
       return near.available ? near : r
     }),
   )
-  return NextResponse.json({ belief, ...finalize(results, belief.level) })
+  return NextResponse.json({ belief, ...finalize(results, belief.level, belief.stake) })
 }

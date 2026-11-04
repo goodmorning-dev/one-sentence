@@ -1,4 +1,4 @@
-import { createPublicClient, erc20Abi, http, parseUnits, type Address, type Hex, type WalletClient } from 'viem'
+import { createPublicClient, erc20Abi, http, parseAbiItem, parseUnits, type Address, type Hex, type WalletClient } from 'viem'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { arbitrum } from 'viem/chains'
 import type { AbstractWallet } from '@nktkas/hyperliquid/signing'
@@ -24,6 +24,22 @@ const ARBITRUM_USDC: Address = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831'
 const MIN_DEPOSIT = 5 // the bridge loses anything smaller
 const WITHDRAW_FEE = 1 // Hyperliquid keeps $1 per withdrawal to Arbitrum
 const AGENT_NAME = 'one sentence' // named, so it never replaces the agent of the user's own Hyperliquid app
+
+// Cents, floored or ceiled without float drift (5.49 * 100 = 548.9999…).
+const floorCents = (n: number) => Math.floor(n * 100 + 1e-6) / 100
+const ceilCents = (n: number) => Math.ceil(n * 100 - 1e-6) / 100
+
+// Hyperliquid's own record of the user's deposits and withdrawals since `since` (ms).
+async function ledger(user: string, since: number) {
+  const r = await fetch('https://api.hyperliquid.xyz/info', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ type: 'userNonFundingLedgerUpdates', user, startTime: since }),
+  })
+  if (!r.ok) return []
+  return (await r.json()) as { time: number; hash: string; delta: { type: string; usdc?: string } }[]
+}
+const transferEvent = parseAbiItem('event Transfer(address indexed from, address indexed to, uint256 value)')
 
 // Hyperliquid's EIP-712 type names contain a colon ("HyperliquidTransaction:ApproveAgent"). Wallets sign them,
 // but viem refuses them before the request reaches the wallet ("Struct type … is invalid"), so the typed data
@@ -124,15 +140,16 @@ async function open(wallet: WalletClient): Promise<VenueSession> {
     },
     async deposit(source, amount, w, progress = () => {}) {
       if (amount < source.min) throw new Error(`The Hyperliquid bridge needs at least $${MIN_DEPOSIT}; less would be lost`)
-      const before = (await state()).total
       let units = parseUnits(amount.toFixed(6), 6)
       if (source.chainId !== arbitrum.id) {
         units = await bridgeToSelf(w, source, { chainId: arbitrum.id, token: ARBITRUM_USDC }, units, progress)
+        if (units === BigInt(0)) throw new Error('Your USDC reached Arbitrum but we couldn’t confirm the amount yet. Add it to Hyperliquid from Arbitrum in a minute.')
         if (units < parseUnits(String(MIN_DEPOSIT), 6)) throw new Error(`Only ${Number(units) / 1e6} USDC reached Arbitrum, under Hyperliquid's $${MIN_DEPOSIT} minimum. It's in your wallet there.`)
         await w.switchChain({ id: arbitrum.id })
         progress('Confirm adding it to Hyperliquid in your wallet (3 of 3)')
       }
-      await w.writeContract({
+      const since = Date.now() - 120_000 // a little slack for the user's clock
+      const hash = await w.writeContract({
         address: ARBITRUM_USDC,
         abi: erc20Abi,
         functionName: 'transfer',
@@ -140,22 +157,22 @@ async function open(wallet: WalletClient): Promise<VenueSession> {
         chain: arbitrum,
         account: w.account!,
       })
-      return JSON.stringify({ before, amount: Number(units) / 1e6 })
+      const receipt = await createPublicClient({ chain: arbitrum, transport: http() }).waitForTransactionReceipt({ hash })
+      if (receipt.status !== 'success') throw new Error('The transfer failed on Arbitrum; nothing was moved')
+      return JSON.stringify({ since, amount: Number(units) / 1e6 })
     },
-    // The bridge credits the sending address; we watch the account grow by the amount sent.
+    // Done when Hyperliquid's ledger shows a deposit of this amount after it was sent. Bets, sales and perp
+    // swings change the balance too, so the balance alone can't tell.
     async status(id): Promise<FundingState> {
-      const { before, amount } = JSON.parse(id)
-      const now = (await state()).total
-      return now >= before + amount - 0.01 ? 'done' : 'processing'
+      const { since, amount } = JSON.parse(id)
+      const entries = await ledger(user, since)
+      return entries.some((e) => e.delta.type === 'deposit' && Math.abs(Number(e.delta.usdc ?? 0) - amount) < 0.01) ? 'done' : 'processing'
     },
   }
 
   // Hyperliquid pays out to Arbitrum only, from the perps balance (validators send it; $1 fee, 3–4 minutes).
   // Standard accounts keep winnings and sales in spot, so that part moves to perps first: two signatures.
-  const arbitrumUsdc = async () => {
-    const client = createPublicClient({ chain: arbitrum, transport: http() })
-    return Number(await client.readContract({ address: ARBITRUM_USDC, abi: erc20Abi, functionName: 'balanceOf', args: [user] })) / 1e6
-  }
+  const arbitrumClient = createPublicClient({ chain: arbitrum, transport: http() })
   const withdrawal: Withdrawal = {
     targets: [{ chainId: 42161, chainName: 'Arbitrum', token: ARBITRUM_USDC, symbol: 'USDC' }],
     fee: WITHDRAW_FEE,
@@ -163,17 +180,25 @@ async function open(wallet: WalletClient): Promise<VenueSession> {
     eta: '3–4 minutes',
     async withdraw(amount) {
       const s = await state()
-      const before = await arbitrumUsdc()
+      const fromBlock = await arbitrumClient.getBlockNumber()
       await onArbitrum()
-      const fromSpot = s.unified ? 0 : Math.max(0, +(amount - s.perpsFree).toFixed(2))
+      // Enough from spot to cover the amount, never more than spot holds.
+      const fromSpot = s.unified ? 0 : Math.min(floorCents(s.spotFree), Math.max(0, ceilCents(amount - s.perpsFree)))
       if (fromSpot > 0) await master.usdClassTransfer({ amount: fromSpot.toFixed(2), toPerp: true })
       await master.withdraw3({ destination: user, amount: amount.toFixed(2) })
-      return JSON.stringify({ before, expect: amount - WITHDRAW_FEE })
+      return JSON.stringify({ fromBlock: fromBlock.toString(), expect: amount - WITHDRAW_FEE })
     },
-    // Done once the wallet on Arbitrum has grown by what was sent, minus Hyperliquid's fee.
+    // Done once Hyperliquid's bridge has paid this amount (minus its fee) to the wallet on Arbitrum. Matching the
+    // bridge's own transfer means other USDC arriving at the same time can't be mistaken for it.
     async status(id) {
-      const { before, expect } = JSON.parse(id)
-      return (await arbitrumUsdc()) >= before + expect - 0.01 ? 'done' : 'processing'
+      const { fromBlock, expect } = JSON.parse(id)
+      const logs = await arbitrumClient.getLogs({
+        address: ARBITRUM_USDC,
+        event: transferEvent,
+        args: { from: BRIDGE, to: user },
+        fromBlock: BigInt(fromBlock),
+      })
+      return logs.some((l) => Math.abs(Number(l.args.value ?? BigInt(0)) / 1e6 - expect) < 0.01) ? 'done' : 'processing'
     },
   }
 
@@ -184,7 +209,7 @@ async function open(wallet: WalletClient): Promise<VenueSession> {
     async account(q) {
       const s = await state()
       const need = shortfall(q, s.spotFree)
-      const canMove = !s.unified && need > 0 && s.perpsFree > 0
+      const canMove = !s.unified && need > 0 && floorCents(s.perpsFree) > 0
       // Hyperliquid only knows an address after its first deposit and refuses every signed action until then
       // ("Must deposit before performing actions"), so a new account adds money before anything else.
       const fresh = s.total <= 0
@@ -217,11 +242,11 @@ async function open(wallet: WalletClient): Promise<VenueSession> {
         ...(canMove
           ? [{
               id: 'move',
-              label: `Move ${usd(Math.min(need, s.perpsFree))} to your trading balance`,
+              label: `Move ${usd(Math.min(need, floorCents(s.perpsFree)))} to your trading balance`,
               detail: 'Outcome bets use your spot USDC; deposits land in perps',
               done: false,
               runnable: true,
-              prompt: `It’s asking you to move ${usd(Math.min(need, s.perpsFree))} from your Hyperliquid perps balance to your spot balance. It stays in your account.`,
+              prompt: `It’s asking you to move ${usd(Math.min(need, floorCents(s.perpsFree)))} from your Hyperliquid perps balance to your spot balance. It stays in your account.`,
             }]
           : []),
         ...(fresh ? [] : [funds]),
@@ -236,7 +261,7 @@ async function open(wallet: WalletClient): Promise<VenueSession> {
         await approveBuilder()
       } else if (id === 'move') {
         const s = await state()
-        const amount = Math.min(shortfall(q, s.spotFree), s.perpsFree)
+        const amount = Math.min(shortfall(q, s.spotFree), floorCents(s.perpsFree))
         await onArbitrum()
         await master.usdClassTransfer({ amount: amount.toFixed(2), toPerp: false })
       }
@@ -276,7 +301,14 @@ async function open(wallet: WalletClient): Promise<VenueSession> {
       const status = r.response.data.statuses[0]
       if (typeof status === 'object' && 'filled' in status) {
         const { totalSz, avgPx } = status.filled
-        return { ok: true, message: `Bought ${Number(totalSz)} YES at ${Number(avgPx).toFixed(4)}`, link: 'https://app.hyperliquid.xyz/portfolio' }
+        const shares = Number(totalSz)
+        if (!(shares > 0)) return { ok: false, message: 'Nothing filled at this price; the book moved. No money was spent. Try again.' }
+        return {
+          ok: true,
+          message: `Bought ${shares} YES at ${Number(avgPx).toFixed(4)}`,
+          filled: { spent: shares * Number(avgPx), payout: shares * (1 - CLOSE_FEE_RATE) },
+          link: 'https://app.hyperliquid.xyz/portfolio',
+        }
       }
       if (typeof status === 'object' && 'error' in status) return { ok: false, message: String(status.error) }
       return { ok: false, message: 'Nothing filled at this price; the book moved. Try again.' }

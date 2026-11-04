@@ -1,4 +1,4 @@
-import { createPublicClient, erc20Abi, http, parseUnits, type Address } from 'viem'
+import { createPublicClient, erc20Abi, http, isAddress, parseUnits, type Address } from 'viem'
 import { CHAINS } from '../wallet'
 import { chainName, type ChainId, type Funding, type FundingSource, type FundingState, type Transfer, type Withdrawal, type WithdrawTarget } from './types'
 
@@ -64,9 +64,10 @@ export function polymarketFunding(account: Address, owner: Address): Funding {
       })
       const body = await r.json()
       const to: Address | undefined = body.address?.evm
-      if (!r.ok || !to) throw new Error(body.error ?? `Polymarket bridge: ${r.status}`)
+      if (!r.ok || !to || !isAddress(to)) throw new Error(body.error ?? `Polymarket bridge: ${r.status}`)
 
-      await wallet.writeContract({
+      const since = Date.now() - 120_000 // a little slack for the user's clock
+      const hash = await wallet.writeContract({
         address: source.token,
         abi: erc20Abi,
         functionName: 'transfer',
@@ -74,11 +75,24 @@ export function polymarketFunding(account: Address, owner: Address): Funding {
         chain: CHAINS[source.chainId],
         account: wallet.account!,
       })
-      return to
+      const receipt = await createPublicClient({ chain: CHAINS[source.chainId], transport: http() }).waitForTransactionReceipt({ hash })
+      if (receipt.status !== 'success') throw new Error(`The transfer failed on ${source.chainName}; nothing was moved`)
+      return JSON.stringify({ address: to, since, hash })
     },
 
-    // The id is the bridge address; its newest transfer is the one we just sent.
-    status: (id) => bridgeStatus(id),
+    // The deposit address is permanent, so its status lists every deposit ever made. Only transfers from this
+    // send count: the one with our transaction hash, or anything the bridge saw after we sent.
+    async status(id) {
+      const { address, since, hash } = JSON.parse(id) as { address: string; since: number; hash: string }
+      const r = await fetch(`${BRIDGE}/status/${address}?limit=20`)
+      if (!r.ok) return 'waiting'
+      const txs: BridgeTx[] = (await r.json()).transactions ?? []
+      const mine = txs.filter((t) => t.txHash?.toLowerCase() === hash.toLowerCase() || (t.createdTimeMs ?? 0) >= since)
+      if (!mine.length) return 'waiting'
+      const states = mine.map((t) => STATE[t.status] ?? 'processing')
+      if (states.includes('failed')) return 'failed'
+      return states.every((x) => x === 'done') ? 'done' : 'processing'
+    },
   }
 }
 
@@ -94,6 +108,7 @@ const WITHDRAW_TARGETS: WithdrawTarget[] = [
   { chainId: 1, chainName: 'Ethereum', token: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', symbol: 'USDC' },
 ]
 
+// A withdrawal address is new each time, so its newest transfer is the one we sent.
 async function bridgeStatus(id: string): Promise<FundingState> {
   const r = await fetch(`${BRIDGE}/status/${id}?limit=1`)
   if (!r.ok) return 'waiting'
@@ -118,7 +133,7 @@ export function polymarketWithdrawal(account: Address, owner: Address, sendPusd:
       })
       const body = await r.json()
       const bridge: Address | undefined = body.address?.evm
-      if (!r.ok || !bridge) throw new Error(body.error ?? `Polymarket bridge: ${r.status}`)
+      if (!r.ok || !bridge || !isAddress(bridge)) throw new Error(body.error ?? `Polymarket bridge: ${r.status}`)
       rememberWithdrawal(owner, bridge) // before sending, so the history finds it even if the page closes mid-way
       await sendPusd(bridge, parseUnits(amount.toFixed(6), 6))
       return bridge

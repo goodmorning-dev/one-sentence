@@ -61,6 +61,7 @@ async function quote(b: Belief): Promise<VenueResult> {
     venue: 'derive',
     available: true,
     actualLevel: upper.strike,
+    partialFrom: lower.strike,
     settles: new Date(inst.option_details.expiry * 1000).toISOString(),
     priceSource: `Derive ${b.asset}-USD index, 30-min TWAP`,
     cost: amount * perSpread + 2 * baseFee,

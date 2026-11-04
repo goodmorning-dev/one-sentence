@@ -26,6 +26,8 @@ export interface TradeResult {
   ok: boolean
   message: string
   link?: string
+  // What a buy actually got: dollars spent and the payout if right. Can be less than the quote (partial fill).
+  filled?: { spent: number; payout: number }
 }
 
 export type ChainId = 1 | 10 | 137 | 8453 | 42161

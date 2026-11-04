@@ -59,9 +59,9 @@ export function BetScreen({ quote, asset, better, onBack, onSwitch, onTraded }: 
 
 function Cell({ label, tone = '', last = false, children }: { label: string; tone?: string; last?: boolean; children: React.ReactNode }) {
   return (
-    <div className={`flex min-w-0 flex-col gap-1 px-3.5 py-4 sm:px-5 sm:py-[18px] ${last ? '' : 'border-r border-chip'}`}>
+    <div className={`flex min-w-0 flex-col gap-1 px-3 py-4 sm:px-5 sm:py-[18px] ${last ? '' : 'border-r border-chip'}`}>
       <dt className="text-xs text-muted sm:text-[13px]">{label}</dt>
-      <dd className={`truncate text-lg font-semibold sm:text-[22px] ${tone}`}>{children}</dd>
+      <dd className={`break-words text-[15px] font-semibold leading-tight tabular-nums min-[400px]:text-lg sm:text-[22px] ${tone}`}>{children}</dd>
     </div>
   )
 }

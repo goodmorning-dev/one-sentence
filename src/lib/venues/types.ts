@@ -23,6 +23,9 @@ export interface Quote {
   how: string
   link: string
   warnings: string[]
+  // A spread (Derive) pays in full only above actualLevel and part of it from this lower price up. Its chance is
+  // the market's view of ending around the middle of the two, not above actualLevel.
+  partialFrom?: number
   // The payout can't be filled at these prices (thin book, real price via RFQ). Shown, never crowned "Pays most".
   estimate?: boolean
   // What the venue's executor needs to place this exact trade. Absent when we can only link out.

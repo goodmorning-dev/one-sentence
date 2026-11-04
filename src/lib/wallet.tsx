@@ -28,6 +28,23 @@ interface WalletState {
 
 const WalletContext = createContext<WalletState | null>(null)
 
+// The site can't revoke its own access in most wallets, so "Disconnect" is remembered here and the wallet's
+// existing permission is ignored until the user presses Connect again.
+const OFF = 'wallet:disconnected'
+const remember = (off: boolean) => {
+  try {
+    if (off) localStorage.setItem(OFF, '1')
+    else localStorage.removeItem(OFF)
+  } catch {}
+}
+const isOff = () => {
+  try {
+    return localStorage.getItem(OFF) === '1'
+  } catch {
+    return false
+  }
+}
+
 export function WalletProvider({ children }: { children: ReactNode }) {
   const [address, setAddress] = useState<Address | null>(null)
   const [available, setAvailable] = useState(false)
@@ -36,8 +53,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     const eth = window.ethereum
     setAvailable(!!eth)
     if (!eth) return
-    eth.request({ method: 'eth_accounts' }).then((a) => setAddress(a[0] ?? null)).catch(() => {})
-    const onAccounts = (a: Address[]) => setAddress(a[0] ?? null)
+    if (!isOff()) eth.request({ method: 'eth_accounts' }).then((a) => setAddress(a[0] ?? null)).catch(() => {})
+    const onAccounts = (a: Address[]) => !isOff() && setAddress(a[0] ?? null)
     eth.on('accountsChanged', onAccounts)
     return () => eth.removeListener('accountsChanged', onAccounts)
   }, [])
@@ -45,7 +62,15 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const connect = useCallback(async () => {
     if (!window.ethereum) throw new Error('No browser wallet found. Install MetaMask or Rabby.')
     const [a] = await window.ethereum.request({ method: 'eth_requestAccounts' })
+    remember(false)
     setAddress(a ?? null)
+  }, [])
+
+  const disconnect = useCallback(() => {
+    remember(true)
+    setAddress(null)
+    // Wallets that support it drop the permission too; others ignore this.
+    window.ethereum?.request({ method: 'wallet_revokePermissions' as never, params: [{ eth_accounts: {} }] as never }).catch(() => {})
   }, [])
 
   const clientOn = useCallback(async (chainId: keyof typeof CHAINS) => {
@@ -63,7 +88,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, [address])
 
   return (
-    <WalletContext.Provider value={{ address, available, connect, disconnect: () => setAddress(null), clientOn }}>
+    <WalletContext.Provider value={{ address, available, connect, disconnect, clientOn }}>
       {children}
     </WalletContext.Provider>
   )
