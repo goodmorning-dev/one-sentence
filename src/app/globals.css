@@ -20,6 +20,7 @@
   --win-hover: #e2faa8;
   --lose: #ff9b7a;
   --lose-ink: #ffc2ad;
+  --sold: #c4a5ff; /* exited early: its own accent, apart from live blue */
 }
 
 @theme inline {
@@ -41,6 +42,7 @@
   --color-win-hover: var(--win-hover);
   --color-lose: var(--lose);
   --color-lose-ink: var(--lose-ink);
+  --color-sold: var(--sold);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }

@@ -89,7 +89,7 @@ export function quickDates(now = new Date()) {
   ]
 }
 
-export function Sentence({ value, onChange }: { value: S; onChange: (patch: Partial<S>) => void }) {
+export function Sentence({ value, spot, onChange }: { value: S; spot: number | null; onChange: (patch: Partial<S>) => void }) {
   const { asset, level, date, stake } = value
 
   return (
@@ -110,6 +110,8 @@ export function Sentence({ value, onChange }: { value: S; onChange: (patch: Part
         <MoneyField label="Amount in dollars" value={stake} decimals={2} onChange={(n) => onChange({ stake: n })} />
         .
       </p>
+
+      <SpotLine asset={asset} level={level} spot={spot} />
 
       <div role="group" aria-label="Quick dates" className="flex flex-wrap gap-2">
         {quickDates().map((q) => (
@@ -372,5 +374,28 @@ function DatePicker({ value, onChange }: { value: string; onChange: (d: string) 
         </div>
       </Panel>
     </>
+  )
+}
+
+// Where the price is now against the one in the sentence, in plain words: how far it has to move for a win.
+function SpotLine({ asset, level, spot }: { asset: Asset; level: number; spot: number | null }) {
+  if (!spot || !(level > 0)) return <p className="min-h-6" aria-hidden />
+  const gap = (level - spot) / spot
+  const pct = `${Math.abs(gap * 100).toFixed(1)}%`
+  const now = spot.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: spot < 1000 ? 2 : 0 })
+  return (
+    <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[15px] leading-normal text-muted" aria-live="polite">
+      <span className="inline-flex items-center gap-2 text-ink">
+        <span className="h-1.5 w-1.5 rounded-full bg-win" aria-hidden />
+        {asset} is {now} now.
+      </span>
+      {Math.abs(gap) < 0.001 ? (
+        <span>Your price is right at it: a coin flip.</span>
+      ) : gap < 0 ? (
+        <span>Your price is {pct} below, so you win unless it falls more than that.</span>
+      ) : (
+        <span>Your price is {pct} above, so it has to rise at least that much.</span>
+      )}
+    </p>
   )
 }

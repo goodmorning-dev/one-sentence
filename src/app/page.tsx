@@ -7,6 +7,7 @@ import { refineAll } from '@/lib/exec/types'
 import type { Quote, VenueId } from '@/lib/venues/types'
 import { useBelief } from '@/lib/useBelief'
 import { usePositions } from '@/lib/usePositions'
+import { useSpot } from '@/lib/useSpot'
 import { Logo, TAGLINE } from './components/Logo'
 import { BetScreen } from './components/BetScreen'
 import { MyBets } from './components/MyBets'
@@ -40,6 +41,7 @@ export default function Home() {
   const [attempt, setAttempt] = useState(0)
   const [picked, setPicked] = useState<VenueId | null>(null)
   const { asset, level, date, stake, ready } = belief
+  const spot = useSpot(asset)
 
   const incomplete = ready && (!(level > 0) || !(stake > 0) || !date)
 
@@ -55,7 +57,7 @@ export default function Home() {
         const body: QuotesData = await r.json()
         const results = await refineAll(body.results, executors)
         if (ctrl.signal.aborted) return
-        setData(finalize(results))
+        setData(finalize(results, level))
         setFailed(false)
         setUpdatedAt(Date.now())
       } catch (e) {
@@ -101,7 +103,7 @@ export default function Home() {
           <BetScreen quote={pickedQuote} asset={asset} better={better} onBack={() => pick(null)} onSwitch={pick} onTraded={bets.refresh} />
         ) : tab === 'bet' ? (
           <div className="flex flex-col gap-8 sm:gap-12">
-            {ready ? <Sentence value={belief} onChange={belief.set} /> : <div className="shimmer h-48 rounded-[20px] bg-surface" />}
+            {ready ? <Sentence value={belief} spot={spot} onChange={belief.set} /> : <div className="shimmer h-48 rounded-[20px] bg-surface" />}
             <Quotes
               data={data}
               incomplete={incomplete}
@@ -111,6 +113,9 @@ export default function Home() {
               stake={stake}
               onRetry={() => setAttempt((n) => n + 1)}
               onTry={(patch) => belief.set(patch)}
+              level={level}
+              spot={spot}
+              asset={asset}
               onPick={pick}
             />
           </div>

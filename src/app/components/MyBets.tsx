@@ -28,7 +28,7 @@ export function StatusChip({ status }: { status: PositionStatus }) {
     case 'lost':
       return <span className={`${base} bg-lose/[0.12] text-lose`}>Lost</span>
     case 'sold':
-      return <span className={`${base} bg-chip text-ink-2`}>Sold</span>
+      return <span className={`${base} bg-sold/[0.14] text-sold`}>Sold</span>
   }
 }
 
@@ -283,7 +283,7 @@ function OpenTable({ bets, sell }: { bets: Position[]; sell: SellState }) {
 }
 
 function ResolvedCard({ p }: { p: Position }) {
-  const tone = p.status === 'won' ? 'text-win' : p.status === 'lost' ? 'text-lose' : 'text-ink-2'
+  const tone = p.pnl > 0.005 ? 'text-win' : p.pnl < -0.005 ? 'text-lose' : 'text-ink-2' // a sale can end either way
   return (
     <li>
       <a href={p.link} target="_blank" rel="noreferrer" className="flex h-full flex-col gap-2.5 rounded-2xl border border-soft-line bg-surface p-[18px] text-ink no-underline transition hover:border-line">
@@ -337,7 +337,7 @@ function OpenBet({ p, sell }: { p: Position; sell: SellState }) {
 }
 
 function ResolvedBet({ p }: { p: Position }) {
-  const tone = p.status === 'won' ? 'text-win' : p.status === 'lost' ? 'text-lose' : 'text-ink-2'
+  const tone = p.pnl > 0.005 ? 'text-win' : p.pnl < -0.005 ? 'text-lose' : 'text-ink-2' // a sale can end either way
   return (
     <li className="flex min-h-[60px] items-center justify-between gap-3 border-b border-raised px-1 py-2">
       <a href={p.link} target="_blank" rel="noreferrer" className="flex min-w-0 flex-col gap-0.5 no-underline">
