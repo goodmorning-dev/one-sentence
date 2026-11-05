@@ -160,13 +160,6 @@ export function WalletPage({ positions, cash, history, historyError, loading, re
               </div>
             )
           })}
-          <div className="flex min-h-16 items-center gap-3">
-            <VenueMark venue="derive" muted />
-            <span className="flex flex-col gap-0.5">
-              <span className="text-[15px] text-ink-2">Derive</span>
-              <span className="text-xs text-faint">Bets open on Derive&rsquo;s own site for now</span>
-            </span>
-          </div>
           <p className="mt-2 text-[13px] leading-normal text-faint">Each venue keeps its own account in your name. We can see balances, never move them without your wallet.</p>
         </section>
       </div>

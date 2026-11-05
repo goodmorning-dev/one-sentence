@@ -56,7 +56,11 @@ async function quote(b: Belief): Promise<VenueResult> {
   }
 
   const width = upper.strike - lower.strike
+  const decimals = Math.max(0, -Math.floor(Math.log10(step) + 1e-9))
   const thinBook = amount > lower.askSize || amount > upper.bidSize
+  // On the book the lower call is bought before the upper one is sold, so its full price sits in the account for a
+  // moment. A spread too big for the top of book goes by RFQ instead, which needs only the net cost.
+  const upfront = thinBook ? 0 : Math.ceil((amount * (lower.ask + legFee(lower.ask)) + baseFee) * 1.01 * 100) / 100
   return {
     venue: 'derive',
     available: true,
@@ -70,10 +74,14 @@ async function quote(b: Belief): Promise<VenueResult> {
     impliedChance: (lower.ask - upper.bid) / width,
     how: `Buy ${amount} × ${lower.name} @ ${lower.ask}, sell ${amount} × ${upper.name} @ ${upper.bid}`,
     link,
+    ticket: {
+      venue: 'derive', lower: lower.name, upper: upper.name, amount: amount.toFixed(decimals), width, maxCost: b.stake, depthChecked: true,
+      upfront,
+    },
     warnings: [
-      ...(thinBook ? [`Top of book holds only ${lower.askSize} / ${upper.bidSize} contracts; a real order goes through RFQ`] : []),
+      ...(thinBook ? [`Top of book holds only ${lower.askSize} / ${upper.bidSize} contracts; market makers price the real bet`] : []),
       `Also pays part of it between $${lower.strike} and $${upper.strike}`,
-      'Fees assume two orderbook orders; an RFQ for the spread is cheaper',
+      ...(upfront ? [`Needs $${upfront.toFixed(2)} in your Derive account for a moment: the lower call is bought first, the difference comes back seconds later`] : []),
     ],
   }
 }

@@ -81,7 +81,7 @@ export function SellPanel({ p, onClose, onSold }: { p: Position; onClose: () => 
         <button onClick={onClose} className="text-muted hover:text-ink">Cancel</button>
       </div>
 
-      {!quote && !error && <p className="flex items-center gap-2 text-muted"><Spinner />Checking what buyers pay right now…</p>}
+      {!quote && !error && <p className="flex items-center gap-2 text-muted"><Spinner />Checking what buyers pay right now{p.venue === 'derive' ? ' (market makers take up to 15 seconds)' : ''}…</p>}
 
       {quote && (
         <>
@@ -93,7 +93,7 @@ export function SellPanel({ p, onClose, onSold }: { p: Position; onClose: () => 
             <p className={`text-[15px] font-medium ${pnl >= 0 ? 'text-win' : 'text-lose'}`}>{signedUsd(pnl)} vs what you paid</p>
           </div>
           <p className="text-[13px] text-faint">
-            {quote.shares.toLocaleString('en-US', { maximumFractionDigits: 2 })} shares at about {quote.avgPrice.toFixed(4)} · fees {usd(quote.fees)} · selling
+            {quote.detail ?? `${quote.shares.toLocaleString('en-US', { maximumFractionDigits: 2 })} shares at about ${quote.avgPrice.toFixed(4)}`} · fees {usd(quote.fees)} · selling
             gives up the {usd(p.payoutIfRight)} you’d get if right
           </p>
           {quote.note && <p className="text-[13px] text-lose-ink">{quote.note}</p>}

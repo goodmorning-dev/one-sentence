@@ -43,6 +43,7 @@ export interface FundingSource {
   min: number // venue minimum in USD
   eta?: string // how long until it arrives, e.g. "under a minute"
   via?: string // a hop the venue needs first, e.g. "Moved to Arbitrum first"
+  note?: string // what that hop involves, shown before the user confirms
 }
 
 export type FundingState = 'waiting' | 'processing' | 'done' | 'failed'
@@ -62,6 +63,7 @@ export interface SellQuote {
   fees: number
   avgPrice: number // per share, before fees
   limit: string // lowest price the order accepts: the last bid level the walk used
+  detail?: string // replaces the "N shares at about P" line where shares don't fit the venue
   note?: string
 }
 

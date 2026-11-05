@@ -32,7 +32,22 @@ export interface Quote {
   ticket?: Ticket
 }
 
-export type Ticket = PolymarketTicket | HyperliquidTicket
+export type Ticket = PolymarketTicket | HyperliquidTicket | DeriveTicket
+
+// A call spread asked for as one RFQ package: buy `lower`, sell `upper`, the same amount of each. Market makers
+// price it at the moment of the bet; it fills whole or not at all, and only if it costs no more than `maxCost`.
+export type DeriveTicket = {
+  venue: 'derive'
+  lower: string // instrument names, e.g. ETH-20261127-2500-C
+  upper: string
+  amount: string // contracts, on the instrument's step
+  width: number // upper strike - lower strike: what each contract pays if right
+  maxCost: number // USD, fees included: the user's stake
+  // USD the account must hold for a moment: on the order book the lower call is bought before the upper one is
+  // sold, so its full price (plus fees) is paid first and the difference comes back seconds later.
+  upfront: number
+  depthChecked: true
+}
 
 // An immediate-or-cancel buy of whole YES shares, priced at the last book level the stake needs.
 export type HyperliquidTicket = {

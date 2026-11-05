@@ -134,7 +134,10 @@ export function TradePanel({ quote, venueName, onClose, onTraded }: {
 
   const steps = account?.steps ?? [{ id: 'wallet', label: '', done: false, runnable: false }]
   const current = steps.find((s) => !s.done)
-  const enough = account?.balance != null && account.balance >= quote.cost
+  // Derive's order book buys the lower call before selling the upper one, so the account needs its full price briefly.
+  const upfront = quote.ticket?.venue === 'derive' ? quote.ticket.upfront || 0 : 0
+  const need = Math.max(quote.cost, upfront)
+  const enough = account?.balance != null && account.balance >= need
   const ready = !!account && !current && enough
   const fundingNeeded = !!account && (current?.id === 'funds' || (!current && !enough))
   const at = current ? steps.indexOf(current) : steps.length
@@ -197,11 +200,18 @@ export function TradePanel({ quote, venueName, onClose, onTraded }: {
         <p className="-mt-2 text-sm leading-normal text-muted">{hint}</p>
       ) : null}
 
+      {fundingNeeded && upfront > quote.cost && !current && (
+        <p className="-mt-2 text-sm leading-normal text-muted">
+          This bet needs {usd(upfront)} in your {venueName} account for a moment: it buys the lower call first, then sells the upper one and the
+          difference comes straight back. You have {usd(account?.balance ?? 0)}.
+        </p>
+      )}
+
       {fundingNeeded && session.current?.funding && (
         <FundingForm
           venueName={venueName}
           funding={session.current.funding}
-          suggested={Math.max(quote.cost - (account?.balance ?? 0), 0)}
+          suggested={Math.max(need - (account?.balance ?? 0), 0)}
           busy={!!busy}
           run={run}
           onArrived={refreshAccount}
@@ -262,7 +272,7 @@ export function FundingForm({ venueName, funding, suggested, busy, run, onArrive
   const wallet = useWallet()
   const [sources, setSources] = useState<FundingSource[] | null>(null)
   const [pick, setPick] = useState(0)
-  const [amount, setAmount] = useState(Math.max(Math.ceil(suggested), 1))
+  const [amount, setAmount] = useState(Number.isFinite(suggested) ? Math.max(Math.ceil(suggested), 1) : 1)
   const [tracking, setTracking] = useState<{ id: string; from: string; amount: number } | null>(null)
   const [state, setState] = useState<FundingState | null>(null)
   const [progress, setProgress] = useState<string | null>(null)
@@ -392,7 +402,7 @@ export function FundingForm({ venueName, funding, suggested, busy, run, onArrive
 
       {source.via && !progress && (
         <p className="text-[13px] leading-normal text-muted">
-          {venueName} only takes USDC from Arbitrum, so we move it there first through Relay (a few cents, seconds), then add it. You confirm three times in your wallet.
+          {source.note ?? `${venueName} only takes USDC from Arbitrum, so we move it there first through Relay (a few cents, seconds), then add it. You confirm three times in your wallet.`}
         </p>
       )}
 
