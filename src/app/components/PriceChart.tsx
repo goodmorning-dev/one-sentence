@@ -332,8 +332,9 @@ export function PriceChart({ asset, spot, settles, lines, highlight }: {
       )}
 
       <div className="relative">
+        {/* No history (the feed is down): leave the chart out rather than show an error where the bet should be. */}
         {!ready ? (
-          <div className={`h-[264px] ${points ? '' : 'shimmer'} grid place-items-center text-sm text-faint`}>{points ? 'Price history isn’t available right now' : ''}</div>
+          points ? null : <div className="shimmer h-[264px]" />
         ) : (
           <svg ref={svg} width={w} height={H} aria-hidden className="block touch-pan-y select-none">
             {/* Price grid, labelled on the left. */}

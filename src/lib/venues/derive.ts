@@ -19,6 +19,18 @@ async function rpc<T>(method: string, params: object): Promise<T> {
 
 const floorTo = (n: number, step: number) => Math.floor(n / step + 1e-9) * step
 
+// The option expiry closest to `date` (YYYY-MM-DD), the later one on a tie. Derive lists every live instrument by
+// name ("ETH-20261113-2450-C"), so the expiries are read from the names.
+async function nearestExpiry(asset: string, date: string): Promise<string | null> {
+  const names = await rpc<string[]>('public/get_all_live_instruments', { currency: asset, instrument_type: 'option' })
+  const today = new Date().toISOString().slice(0, 10)
+  const days = [...new Set(names.filter((n) => n.startsWith(`${asset}-`)).map((n) => n.split('-')[1]).filter((d) => /^\d{8}$/.test(d)))]
+    .map((d) => `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`)
+    .filter((d) => d > today) // today's options expire at 08:00 UTC, often already gone
+  const gap = (d: string) => Math.abs(Date.parse(d) - Date.parse(date))
+  return days.sort((x, y) => gap(x) - gap(y) || (x < y ? 1 : -1))[0] ?? null
+}
+
 // Derive has no binary options, so "above X" becomes a call spread: buy the strike below X, sell the X call.
 // It pays the full width whenever the belief is true (ETH at or above X); between the strikes it pays part of it.
 async function quote(b: Belief): Promise<VenueResult> {
@@ -32,6 +44,12 @@ async function quote(b: Belief): Promise<VenueResult> {
     .filter(([name]) => name.endsWith('-C'))
     .map(([name, t]) => ({ name, strike: Number(name.split('-')[2]), bid: +t.b, bidSize: +t.B, ask: +t.a, askSize: +t.A, index: +t.I }))
     .sort((x, y) => x.strike - y.strike)
+
+  // No options expire that day: point at the nearest day that has them, so the UI can offer it in one click.
+  if (!calls.length) {
+    const date = await nearestExpiry(b.asset, b.date).catch(() => null)
+    return { venue: 'derive', available: false, reason: 'No market that day', link, ...(date ? { suggest: { level: b.level, date } } : {}) }
+  }
 
   const upper = calls.find((c) => c.strike >= b.level && c.bid > 0)
   const lower = upper && calls.findLast((c) => c.strike < upper.strike && c.ask > 0)

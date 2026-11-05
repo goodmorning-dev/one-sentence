@@ -12,8 +12,6 @@ export const VENUE_NAMES: Record<VenueId, string> = { derive: 'Derive', polymark
 export interface QuotesData { results: VenueResult[]; best: VenueId | null; comparable: VenueId[]; error?: string }
 
 const card = 'rounded-[20px] border bg-surface sm:rounded-3xl'
-const primaryBtn = 'min-h-12 rounded-[14px] bg-win px-5 text-[15px] font-semibold text-bg transition hover:bg-win-hover'
-const secondaryBtn = 'min-h-12 rounded-[14px] border border-strong-line px-5 text-[15px] font-medium text-ink transition hover:bg-raised'
 
 export function VenueMark({ venue, muted = false, small = false }: { venue: VenueId; muted?: boolean; small?: boolean }) {
   if (small) {
@@ -90,28 +88,41 @@ export function Quotes(props: {
   const none = data.results.filter((r): r is Unavailable => !r.available)
 
   if (quotes.length === 0) {
+    // Bets the venues can take near this one, nearest date first: one click puts them in the sentence.
+    const seen = new Set<string>()
+    const offers = none
+      .filter((r) => r.suggest)
+      .map((r) => ({ venue: r.venue, suggest: r.suggest! }))
+      .filter((o) => !seen.has(`${o.suggest.level}|${o.suggest.date}`) && !!seen.add(`${o.suggest.level}|${o.suggest.date}`))
     return (
-      <section className={`${card} flex flex-col gap-3 border-soft-line p-5`}>
-        <h2 className="text-[17px] font-semibold">Nobody offers this bet yet</h2>
-        <p className="text-sm leading-normal text-muted">Markets this far out usually open a day or two before. Try a closer date.</p>
-        <div className="flex flex-wrap gap-2">
-          {quickDates().slice(0, 2).map((q) => (
-            <button key={q.label} onClick={() => onTry({ date: q.date })} className="min-h-11 rounded-full border border-strong-line px-4 text-sm text-ink hover:bg-raised">
-              Try {q.label.toLowerCase()}
-            </button>
-          ))}
+      <section className={`${card} flex flex-col gap-4 border-soft-line p-5 sm:p-6`}>
+        <div className="flex flex-col gap-1.5">
+          <h2 className="text-[17px] font-semibold">Nobody offers this exact bet</h2>
+          <p className="text-sm leading-normal text-muted">
+            {offers.length ? 'These are the closest bets you can place right now:' : 'Markets this far out usually open a day or two before. Try a closer date.'}
+          </p>
         </div>
-        <ul className="mt-1 flex flex-col text-[13px] text-faint">
-          {none.map((r) => (
-            <li key={r.venue} className="flex min-h-9 flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-chip py-1.5">
-              <span className="text-ink-2">{VENUE_NAMES[r.venue]}</span>
-              <span className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 text-right">
-                {r.reason}
-                {r.suggest && <TryButton suggest={r.suggest} onTry={onTry} />}
-              </span>
-            </li>
-          ))}
-        </ul>
+        <div className="flex flex-wrap gap-2">
+          {offers.length
+            ? offers.map((o) => (
+                <button
+                  key={`${o.suggest.level}|${o.suggest.date}`}
+                  onClick={() => onTry(o.suggest)}
+                  className="flex min-h-12 flex-col items-start justify-center rounded-2xl border border-win/40 px-4 py-2 text-left transition hover:bg-win/10"
+                >
+                  <span className="text-[15px] font-medium text-win">{asset} above {usd(o.suggest.level, 0)} on {day(o.suggest.date).replace(',', '')}</span>
+                  <span className="text-xs text-faint">on {VENUE_NAMES[o.venue]}</span>
+                </button>
+              ))
+            : quickDates().slice(0, 2).map((q) => (
+                <button key={q.label} onClick={() => onTry({ date: q.date })} className="min-h-11 rounded-full border border-strong-line px-4 text-sm text-ink hover:bg-raised">
+                  Try {q.label.toLowerCase()}
+                </button>
+              ))}
+        </div>
+        <p className="text-[13px] leading-normal text-faint">
+          Checked {none.map((r) => VENUE_NAMES[r.venue]).join(', ')}: {none.every((r) => friendly(r.reason) === NO_MARKET) ? NO_MARKET.toLowerCase() : none.map((r) => `${VENUE_NAMES[r.venue]}: ${friendly(r.reason)}`).join(' · ')}.
+        </p>
       </section>
     )
   }
@@ -149,7 +160,7 @@ export function Quotes(props: {
         </div>
       )}
 
-      {/* While new prices load the rows describe the previous sentence: dim them and make them inert. */}
+      {/* While new prices load the offer describes the previous sentence: dim it and make it inert. */}
       <div inert={loading} className={`${card} overflow-hidden border-soft-line transition-opacity ${loading ? 'opacity-50' : ''}`}>
         <PriceChart
           asset={asset}
@@ -158,34 +169,21 @@ export function Quotes(props: {
           highlight={hover}
           lines={[...same, ...others].map((q) => ({ venue: q.venue, price: q.actualLevel, main: same.includes(q), label: `${VENUE_NAMES[q.venue]} · ${pct(q.impliedChance)}` }))}
         />
-        <div className={`${cols} hidden border-b border-chip px-7 py-3.5 text-xs uppercase tracking-[0.04em] text-faint md:grid`}>
-          <span>Where</span><span>If you&rsquo;re right</span><span>If you&rsquo;re wrong</span><span>Chance it happens</span><span />
-        </div>
-        {[...same, ...others].map((q) => (
-          <QuoteRow
-            key={q.venue}
-            q={q}
-            best={data.best === q.venue && same.length > 1}
-            primary={q === lead}
-            other={!same.includes(q)}
-            stake={stake}
-            onPick={onPick}
-            onHover={setHover}
-          />
-        ))}
-        {none.map((r) => (
-          <div key={r.venue} className="flex flex-col gap-2 border-t border-chip px-5 py-4 md:grid md:grid-cols-[2fr_6.6fr] md:items-center md:gap-4 md:px-7">
-            <span className="flex items-center gap-3">
-              <VenueMark venue={r.venue} muted />
-              <span className="text-base text-ink-2">{VENUE_NAMES[r.venue]}</span>
-            </span>
-            <span className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-faint">
-              {r.reason}
-              {r.suggest && <TryButton suggest={r.suggest} onTry={onTry} />}
-            </span>
-          </div>
-        ))}
+        <Offer q={lead} asset={asset} stake={stake} checked={data.results.length} best={data.best === lead.venue && same.length > 1} onPick={onPick} />
       </div>
+
+      <Compare
+        rows={[...same, ...others].filter((q) => q !== lead)}
+        lead={lead}
+        asset={asset}
+        none={none}
+        best={data.best}
+        same={same}
+        stake={stake}
+        onPick={onPick}
+        onHover={setHover}
+        onTry={onTry}
+      />
 
       <ChanceHint />
 
@@ -194,7 +192,160 @@ export function Quotes(props: {
   )
 }
 
-const cols = 'md:grid-cols-[2fr_1.3fr_1.3fr_1.4fr_1.6fr] md:gap-4'
+
+// Venues word "nothing to bet on here" in their own terms; people only need to know there's no market.
+const NO_MARKET = 'No market for that day'
+function friendly(reason: string) {
+  return /no open|no .*market|no tradable|no strike|not taking orders/i.test(reason) ? NO_MARKET : reason
+}
+
+const money = (n: number) => usd(n, n % 1 ? 2 : 0)
+
+// The best offer as one plain sentence, with the one button that places it. Everything else is a click away.
+function Offer({ q, asset, stake, checked, best, onPick }: {
+  q: Quote
+  asset: Asset
+  stake: number
+  checked: number // venues asked, for "best of N"
+  best: boolean
+  onPick: (v: VenueId) => void
+}) {
+  const name = VENUE_NAMES[q.venue]
+  const tradable = !!q.ticket && !!executors[q.venue]
+  const profit = q.payoutIfRight - q.cost
+  const { mood } = chanceWords(q.impliedChance)
+  const times = q.payoutIfRight / q.cost
+  const button = 'group flex min-h-14 w-full items-center justify-center gap-2 rounded-2xl bg-win px-7 text-[17px] font-semibold text-bg no-underline shadow-[0_8px_30px_-12px_var(--win)] transition hover:bg-win-hover sm:w-auto sm:min-w-64'
+  const arrow = <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="transition group-hover:translate-x-0.5"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+  const row = 'flex items-baseline justify-between gap-4 py-3.5 first:pt-0 last:pb-0'
+  return (
+    <article aria-label={`Best offer, on ${name}`} className="border-t border-chip">
+      <div className="grid md:grid-cols-[1.45fr_1fr]">
+        {/* The payout: what someone actually wants to know first, big, with the condition right under it. */}
+        <div className="relative flex flex-col gap-4 overflow-hidden px-5 py-6 sm:px-7 sm:py-8">
+          <span aria-hidden className="pointer-events-none absolute -left-24 -top-24 h-64 w-64 rounded-full bg-win/[0.07] blur-3xl" />
+          <div className="relative flex flex-wrap items-center gap-2">
+            <span className="text-[13px] font-medium uppercase tracking-[0.06em] text-muted">If you&rsquo;re right you get</span>
+            <span className="rounded-full bg-win/15 px-2.5 py-0.5 text-xs font-semibold text-win">{times >= 10 ? Math.round(times) : times.toFixed(1)}× your money</span>
+          </div>
+          <div className="relative flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <span key={q.payoutIfRight} className="rise text-[44px] font-semibold leading-none tracking-[-0.035em] text-win tabular-nums sm:text-[56px]">{usd(q.payoutIfRight)}</span>
+            <span className="text-[17px] font-medium text-ink-2 tabular-nums">+{usd(profit)} profit</span>
+          </div>
+          <p className="relative flex items-start gap-2.5 rounded-xl border border-soft-line bg-bg/40 px-3.5 py-3 text-[15px] leading-snug text-ink-2">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="mt-px flex-none text-win"><path d="M4 21V4M4 4h12l-2 4 2 4H4" /></svg>
+            <span>
+              If {asset} is above <strong className="font-semibold text-ink">{money(q.actualLevel)}</strong> on <strong className="font-semibold text-ink">{when(q.settles)}</strong>
+            </span>
+          </p>
+        </div>
+
+        {/* The other side of the bet: what goes in, what's lost, how likely. */}
+        <dl className="flex flex-col divide-y divide-chip border-t border-chip bg-raised/30 px-5 py-6 text-[15px] sm:px-7 md:border-l md:border-t-0 md:py-8">
+          <div className={row}>
+            <dt className="text-muted">You put in</dt>
+            <dd className="text-right">
+              <span className="text-lg font-semibold text-ink tabular-nums">{money(q.cost)}</span>
+              {Math.abs(q.cost - stake) >= 0.01 && <span className="block text-xs text-faint">nearest to {money(stake)}: fixed sizes</span>}
+            </dd>
+          </div>
+          <div className={row}>
+            <dt className="text-muted">If you&rsquo;re wrong</dt>
+            <dd className="text-right">
+              <span className="text-lg font-semibold text-lose tabular-nums">−{money(q.cost)}</span>
+              {q.partialFrom != null && <span className="block text-xs text-faint">below {money(q.partialFrom)}; part back between</span>}
+            </dd>
+          </div>
+          <div className="flex flex-col gap-2.5 pt-3.5">
+            <div className="flex items-baseline justify-between gap-4">
+              <dt className="text-muted">Chance</dt>
+              <dd className="text-right"><span className="text-lg font-semibold text-ink tabular-nums">{pct(q.impliedChance)}</span> <span className="text-sm text-faint">{mood}</span></dd>
+            </div>
+            <div role="img" aria-label={`Chance: ${pct(q.impliedChance)}, ${mood}`} className="h-2 rounded-full bg-track">
+              <div className="h-2 min-w-2 rounded-full bg-win" style={{ width: `${q.impliedChance * 100}%` }} />
+            </div>
+            <span className="text-xs text-faint">What people betting on {name} think</span>
+          </div>
+        </dl>
+      </div>
+
+      <div className="flex flex-col items-stretch gap-3 border-t border-chip px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-7">
+        {tradable ? (
+          <button onClick={() => onPick(q.venue)} className={button}>Bet {money(q.cost)}{arrow}</button>
+        ) : (
+          <a href={q.link} target="_blank" rel="noreferrer" className={button}>
+            Bet on {name}
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M7 17 17 7M8 7h9v9" /></svg>
+          </a>
+        )}
+        <span className="flex items-center justify-center gap-2 text-[13px] text-faint sm:justify-end">
+          <VenueMark venue={q.venue} small />
+          Through {name}
+          {best && <span className="rounded-full bg-win px-2 py-0.5 text-[11px] font-semibold text-bg">Best of {checked}</span>}
+        </span>
+      </div>
+      {q.estimate && <p className="border-t border-chip px-5 py-3 text-[13px] text-lose-ink sm:px-7">Estimated prices: not enough is on offer at them, so the real price comes when you bet.</p>}
+    </article>
+  )
+}
+
+// Everything that isn't the offer: other venues' prices and why the rest had nothing. Closed by default.
+function Compare({ rows, lead, asset, none, best, same, stake, onPick, onHover, onTry }: {
+  rows: Quote[]
+  lead: Quote
+  asset: Asset
+  none: Unavailable[]
+  best: VenueId | null
+  same: Quote[]
+  stake: number
+  onPick: (v: VenueId) => void
+  onHover: (v: VenueId | null) => void
+  onTry: (patch: { level?: number; date?: string }) => void
+}) {
+  const [open, setOpen] = useState(false)
+  if (!rows.length && !none.length) return null
+  const summary = rows.length
+    ? `${rows.length} other ${rows.length === 1 ? 'offer' : 'offers'}${none.length ? `; ${none.map((r) => VENUE_NAMES[r.venue]).join(' and ')} had nothing` : ''}`
+    : `Also checked ${none.map((r) => VENUE_NAMES[r.venue]).join(' and ')}: ${none.every((r) => friendly(r.reason) === NO_MARKET) ? NO_MARKET.toLowerCase() : 'nothing to offer'}`
+  return (
+    <div className="flex flex-col gap-3">
+      <button onClick={() => setOpen(!open)} aria-expanded={open} className="-mx-1 flex min-h-11 items-center justify-between gap-3 rounded-xl px-3 text-left text-sm text-muted hover:text-ink">
+        <span>{summary}</span>
+        <span className="flex flex-none items-center gap-1.5">
+          {open ? 'Hide' : 'Compare'}
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden className={`transition ${open ? 'rotate-180' : ''}`}><path d="m6 9 6 6 6-6" /></svg>
+        </span>
+      </button>
+      {open && (
+        <div className="flex flex-col gap-3">
+          {rows.length > 0 && (
+            <div className="grid gap-3 md:grid-cols-2">
+              {rows.map((q) => (
+                <OtherOffer key={q.venue} q={q} lead={lead} asset={asset} best={best === q.venue} other={!same.includes(q)} stake={stake} onPick={onPick} onHover={onHover} />
+              ))}
+            </div>
+          )}
+          {none.length > 0 && (
+            <ul className="flex flex-col rounded-2xl border border-dashed border-soft-line px-5 py-1">
+              {none.map((r) => (
+                <li key={r.venue} className="flex min-h-14 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-chip py-2.5 first:border-t-0">
+                  <span className="flex items-center gap-3">
+                    <VenueMark venue={r.venue} muted />
+                    <span className="flex flex-col">
+                      <span className="text-[15px] text-ink-2">{VENUE_NAMES[r.venue]}</span>
+                      <span className="text-[13px] text-faint">{friendly(r.reason)}</span>
+                    </span>
+                  </span>
+                  {r.suggest && <TryButton suggest={r.suggest} onTry={onTry} />}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
 
 // "Likely · 72%": the mood first for someone new to this, the number for everyone else.
 const pct = (p: number) => `${Math.min(99, Math.max(1, Math.round(p * 100)))}%`
@@ -203,84 +354,84 @@ export function chanceLabel(p: number) {
   return `${mood[0].toUpperCase()}${mood.slice(1)} · ${pct(p)}`
 }
 
-// One venue, one row: what you'd win, what you'd risk, how likely it is, and the way in. On a phone the same
-// cells stack into a card.
-function QuoteRow({ q, best, primary, other, stake, onPick, onHover }: {
+// Another venue's offer as a small card in the same language as the main one: what you get, for what, how likely.
+// A different price is a different bet, so the card says how it differs from the main offer.
+function OtherOffer({ q, lead, asset, best, other, stake, onPick, onHover }: {
   q: Quote
+  lead: Quote
+  asset: Asset
   best: boolean
-  primary: boolean
-  other: boolean // a different price from the sentence's: a different bet, labelled as such
+  other: boolean // a different price from the main offer's
   stake: number
   onPick: (v: VenueId) => void
   onHover: (v: VenueId | null) => void
 }) {
   const name = VENUE_NAMES[q.venue]
   const tradable = !!q.ticket && !!executors[q.venue]
-  const cost = usd(q.cost, q.cost % 1 ? 2 : 0)
-  const figure = best ? 'text-[26px]' : 'text-[22px]'
-  const key = `${q.payoutIfRight}-${q.cost}` // re-runs the rise animation when the figures change
-  const badge = best ? (
-    <span className="rounded-full bg-win px-2 py-0.5 text-[11px] font-semibold text-bg">Best price</span>
-  ) : q.estimate ? (
-    <span title="Not enough is on offer at these prices; the real price comes from the venue when you bet" className="rounded-full bg-chip px-2 py-0.5 text-[11px] text-ink-2">Estimate</span>
-  ) : null
-
+  const { mood } = chanceWords(q.impliedChance)
+  const times = q.payoutIfRight / q.cost
+  const higher = q.actualLevel > lead.actualLevel
+  const button = 'group flex min-h-12 w-full items-center justify-center gap-2 rounded-[14px] border border-strong-line px-5 text-[15px] font-semibold text-ink no-underline transition hover:border-win/60 hover:bg-win/[0.06]'
   return (
     <article
       onMouseEnter={() => onHover(q.venue)}
       onMouseLeave={() => onHover(null)}
       aria-label={`${name}${best ? ', best price' : ''}`}
-      className={`${cols} relative grid grid-cols-2 items-center gap-x-4 gap-y-4 border-t border-chip px-5 py-5 first:border-t-0 md:px-7 md:py-6 ${best ? 'bg-win/[0.045]' : ''}`}
+      className="flex flex-col gap-4 rounded-[20px] border border-soft-line bg-surface p-5 transition hover:border-strong-line"
     >
-      {best && <span aria-hidden className="absolute bottom-4 left-0 top-4 w-[3px] rounded-r-[3px] bg-win" />}
-      <div className="col-span-2 flex items-center gap-3 md:col-span-1">
-        <VenueMark venue={q.venue} />
-        <span className="flex flex-wrap items-center gap-x-2 gap-y-1 md:flex-col md:items-start">
-          <span className="text-[17px] font-semibold">{name}</span>
-          {badge}
-          <span className={`basis-full text-[13px] md:basis-auto ${other ? 'text-live-ink' : 'text-faint'}`}>
-            {q.partialFrom != null
-              ? `${other ? 'Other price: f' : 'F'}ull win above ${usd(q.actualLevel, q.actualLevel % 1 ? 2 : 0)}, part from ${usd(q.partialFrom, q.partialFrom % 1 ? 2 : 0)}`
-              : `${other ? 'Other price: ' : 'Wins '}above ${usd(q.actualLevel, q.actualLevel % 1 ? 2 : 0)}`}
-          </span>
+      <header className="flex items-center justify-between gap-3">
+        <span className="flex items-center gap-2.5">
+          <VenueMark venue={q.venue} />
+          <span className="text-[16px] font-semibold">{name}</span>
+          {best && <span className="rounded-full bg-win px-2 py-0.5 text-[11px] font-semibold text-bg">Best price</span>}
+          {q.estimate && <span title="Not enough is on offer at these prices; the real price comes when you bet" className="rounded-full bg-chip px-2 py-0.5 text-[11px] text-ink-2">Estimate</span>}
+        </span>
+        <span className="rounded-full bg-chip px-2.5 py-1 text-xs font-semibold text-ink-2">{times >= 10 ? Math.round(times) : times.toFixed(1)}×</span>
+      </header>
+
+      <div className="flex flex-col gap-1">
+        <span className="text-xs font-medium uppercase tracking-[0.06em] text-faint">You get</span>
+        <span className="flex flex-wrap items-baseline gap-x-2.5">
+          <span key={q.payoutIfRight} className="rise text-[30px] font-semibold leading-tight tracking-[-0.03em] text-win tabular-nums">{usd(q.payoutIfRight)}</span>
+          <span className="text-sm text-muted tabular-nums">for {money(q.cost)}</span>
         </span>
       </div>
-      <div className="flex flex-col gap-0.5">
-        <span className="text-[13px] text-muted md:hidden">If you&rsquo;re right</span>
-        <span key={key} className={`rise ${figure} font-semibold tracking-[-0.02em] text-win`}>+{usd(q.payoutIfRight - q.cost)}</span>
-        <span className="text-[13px] text-faint">you get {usd(q.payoutIfRight)} back</span>
-      </div>
-      <div className="flex flex-col gap-0.5">
-        <span className="text-[13px] text-muted md:hidden">If you&rsquo;re wrong</span>
-        <span className={`${figure} font-semibold tracking-[-0.02em] text-lose`}>−{cost}</span>
-        <span className="text-[13px] text-faint">
-          {q.partialFrom != null ? `all of it below ${usd(q.partialFrom, q.partialFrom % 1 ? 2 : 0)}` : 'you lose what you put in'}
+
+      <p className="flex flex-col gap-1 rounded-xl bg-bg/50 px-3.5 py-2.5 text-sm leading-snug text-ink-2">
+        <span>
+          If {asset} is above <strong className="font-semibold text-ink">{money(q.actualLevel)}</strong>
+          {q.partialFrom != null && <span className="text-faint"> (part back from {money(q.partialFrom)})</span>}
         </span>
-      </div>
-      <div className="col-span-2 flex flex-col gap-2 md:col-span-1">
-        <span className="flex justify-between gap-3 text-[15px] md:font-medium">
-          <span className="text-muted md:hidden">Chance it happens</span>
-          {chanceLabel(q.impliedChance)}
-        </span>
-        <div role="img" aria-label={`Chance it happens: ${chanceLabel(q.impliedChance)}`} className="h-1.5 rounded-full bg-track">
-          <div className={`h-1.5 min-w-1.5 rounded-full ${best ? 'bg-win' : 'bg-muted'}`} style={{ width: `${q.impliedChance * 100}%` }} />
-        </div>
-        {q.partialFrom != null && (
-          <span className="text-xs leading-snug text-faint">
-            Of ending around {usd((q.partialFrom + q.actualLevel) / 2, 0)}. A full win is a little less likely.
+        {other && (
+          <span className="text-[13px] text-live-ink">
+            A different bet: {higher ? 'higher' : 'lower'} than the {money(lead.actualLevel)} above
           </span>
         )}
+      </p>
+
+      <div className="flex flex-col gap-2">
+        <div className="flex items-baseline justify-between gap-3 text-sm">
+          <span className="text-muted">Chance</span>
+          <span><span className="font-semibold text-ink tabular-nums">{pct(q.impliedChance)}</span> <span className="text-faint">{mood}</span></span>
+        </div>
+        <div role="img" aria-label={`Chance: ${pct(q.impliedChance)}, ${mood}`} className="h-1.5 rounded-full bg-track">
+          <div className="h-1.5 min-w-1.5 rounded-full bg-muted" style={{ width: `${q.impliedChance * 100}%` }} />
+        </div>
       </div>
-      <div className="col-span-2 flex flex-col gap-1.5 md:col-span-1">
+
+      <div className="mt-auto flex flex-col gap-1.5">
         {tradable ? (
-          <button onClick={() => onPick(q.venue)} className={primary ? primaryBtn : secondaryBtn}>Bet {cost}</button>
+          <button onClick={() => onPick(q.venue)} className={button}>
+            Bet {money(q.cost)}
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="transition group-hover:translate-x-0.5"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+          </button>
         ) : (
-          <a href={q.link} target="_blank" rel="noreferrer" className={`${primary ? primaryBtn : secondaryBtn} flex items-center justify-center gap-1.5 no-underline`}>
+          <a href={q.link} target="_blank" rel="noreferrer" className={button}>
             Bet on {name}
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M7 17 17 7M8 7h9v9" /></svg>
           </a>
         )}
-        {Math.abs(q.cost - stake) >= 0.01 && <span className="text-center text-xs text-faint">Closest to {usd(stake, stake % 1 ? 2 : 0)} it allows</span>}
+        {Math.abs(q.cost - stake) >= 0.01 && <span className="text-center text-xs text-faint">Fixed sizes: nearest to {money(stake)}</span>}
       </div>
     </article>
   )
