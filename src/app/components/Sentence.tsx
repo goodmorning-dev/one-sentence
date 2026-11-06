@@ -78,14 +78,29 @@ function MoneyField({ label, value, decimals = 0, onChange }: { label: string; v
   )
 }
 
+// One-tap dates, each named for what it is from today and showing the day it lands on, so nothing jumps
+// unexpectedly. Fridays are where most markets settle; the month's last Friday is the big monthly expiry.
+// A Friday that is today doesn't count: most of today's markets have already settled by the time anyone looks.
 export function quickDates(now = new Date()) {
+  const at = (iso: string) => new Date(`${iso}T12:00:00Z`)
   const tomorrow = new Date(now)
   tomorrow.setUTCDate(now.getUTCDate() + 1)
   const friday = nextFriday(now)
+  const fridayAfter = nextFriday(at(friday))
+  const isFriday = now.getUTCDay() === 5
+  // The last Friday of this month, or of next month when this month's is already among the chips or past.
+  const lastFriday = (y: number, m: number) => {
+    const d = new Date(Date.UTC(y, m + 1, 0, 12))
+    d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() - 5 + 7) % 7))
+    return isoDate(d)
+  }
+  let monthly = lastFriday(now.getUTCFullYear(), now.getUTCMonth())
+  if (monthly <= fridayAfter) monthly = lastFriday(now.getUTCFullYear(), now.getUTCMonth() + 1)
   return [
     { label: 'Tomorrow', date: isoDate(tomorrow) },
-    { label: 'Friday', date: friday },
-    { label: 'Next Friday', date: nextFriday(new Date(`${friday}T12:00:00Z`)) },
+    { label: isFriday ? 'Next Friday' : 'This Friday', date: friday },
+    { label: isFriday ? 'In 2 weeks' : 'Next Friday', date: fridayAfter },
+    { label: 'End of month', date: monthly },
   ]
 }
 
@@ -119,11 +134,12 @@ export function Sentence({ value, spot, onChange }: { value: S; spot: number | n
             key={q.label}
             onClick={() => onChange({ date: q.date })}
             aria-pressed={q.date === date}
-            className={`min-h-11 rounded-full border px-4 text-sm transition sm:px-[18px] ${
+            className={`flex min-h-11 items-center gap-2 rounded-full border px-4 text-sm transition sm:px-[18px] ${
               q.date === date ? 'border-win/60 bg-win/10 text-win' : 'border-line text-ink-2 hover:border-strong-line hover:text-ink'
             }`}
           >
             {q.label}
+            <span className={`text-xs ${q.date === date ? 'text-win/70' : 'text-faint'}`}>{day(q.date).replace(',', '')}</span>
           </button>
         ))}
       </div>
@@ -377,6 +393,31 @@ function DatePicker({ value, onChange }: { value: string; onChange: (d: string) 
   )
 }
 
+// The coin's own mark in its brand colour: Ethereum's diamond, Bitcoin's ₿.
+export function CoinIcon({ asset, size = 20 }: { asset: Asset; size?: number }) {
+  return asset === 'BTC' ? (
+    <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden className="flex-none">
+      <circle cx="16" cy="16" r="16" fill="#F7931A" />
+      <path
+        fill="#fff"
+        d="M23.19 14.02c.32-2.12-1.3-3.26-3.5-4.02l.71-2.86-1.75-.43-.69 2.78c-.46-.11-.93-.22-1.4-.33l.7-2.8-1.74-.43-.71 2.85c-.38-.09-.75-.17-1.12-.26l-2.4-.6-.46 1.86s1.29.3 1.26.31c.7.18.83.64.81 1.01l-.81 3.25c.05.01.11.03.18.06l-.18-.05-1.14 4.55c-.09.21-.3.53-.79.41.02.03-1.27-.32-1.27-.32l-.87 2 2.27.56c.42.11.84.22 1.25.32l-.72 2.9 1.74.44.72-2.87c.48.13.94.25 1.39.36l-.71 2.86 1.75.43.72-2.9c2.98.57 5.22.34 6.17-2.36.76-2.17-.04-3.43-1.61-4.25 1.14-.26 2-1.01 2.23-2.57zm-3.99 5.6c-.54 2.18-4.2 1-5.39.71l.96-3.86c1.19.3 5 .89 4.43 3.15zm.54-5.63c-.5 1.98-3.54.98-4.53.73l.88-3.5c.99.25 4.17.71 3.65 2.77z"
+      />
+    </svg>
+  ) : (
+    <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden className="flex-none">
+      <circle cx="16" cy="16" r="16" fill="#627EEA" />
+      <g fill="#fff">
+        <path fillOpacity=".6" d="M16.5 4v8.87l7.5 3.35z" />
+        <path d="M16.5 4 9 16.22l7.5-3.35z" />
+        <path fillOpacity=".6" d="M16.5 21.97v6.03L24 17.62z" />
+        <path d="M16.5 28v-6.03L9 17.62z" />
+        <path fillOpacity=".2" d="m16.5 20.57 7.5-4.35-7.5-3.35z" />
+        <path fillOpacity=".6" d="m9 16.22 7.5 4.35v-7.7z" />
+      </g>
+    </svg>
+  )
+}
+
 // Where the price is now against the one in the sentence, in plain words: how far it has to move for a win.
 function SpotLine({ asset, level, spot }: { asset: Asset; level: number; spot: number | null }) {
   if (!spot || !(level > 0)) return <p className="min-h-6" aria-hidden />
@@ -386,7 +427,7 @@ function SpotLine({ asset, level, spot }: { asset: Asset; level: number; spot: n
   return (
     <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[15px] leading-normal text-muted">
       <span className="inline-flex items-center gap-2 text-ink">
-        <span className="h-1.5 w-1.5 rounded-full bg-win" aria-hidden />
+        <CoinIcon asset={asset} />
         {asset} is {now} now.
       </span>
       {Math.abs(gap) < 0.001 ? (

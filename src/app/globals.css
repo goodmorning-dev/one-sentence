@@ -21,6 +21,12 @@
   --lose: #ff9b7a;
   --lose-ink: #ffc2ad;
   --sold: #c4a5ff; /* exited early: its own accent, apart from live blue */
+  --price: #e9e8e2; /* the asset's price line on the chart: neutral, so the venues' colours stand out */
+  /* Each venue's own colour, so its cards, icon and chart line are recognised at a glance. Lifted a little
+     where the brand colour is too dark to read on our background. */
+  --derive: #ff6b2c;
+  --polymarket: #5b86ff;
+  --hyperliquid: #97fce3;
 }
 
 @theme inline {
@@ -43,6 +49,10 @@
   --color-lose: var(--lose);
   --color-lose-ink: var(--lose-ink);
   --color-sold: var(--sold);
+  --color-price: var(--price);
+  --color-derive: var(--derive);
+  --color-polymarket: var(--polymarket);
+  --color-hyperliquid: var(--hyperliquid);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -94,6 +104,23 @@ summary::-webkit-details-marker {
 .rise {
   display: inline-block;
   animation: rise 180ms ease-out;
+}
+
+/* The payout pin on the chart breathes softly so the eye finds it. */
+@keyframes pin-pulse {
+  0%, 100% {
+    opacity: 0.9;
+    transform: scale(0.7);
+  }
+  50% {
+    opacity: 0.25;
+    transform: scale(1.25);
+  }
+}
+.pin-pulse {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: pin-pulse 2.4s ease-in-out infinite;
 }
 
 @keyframes shimmer {

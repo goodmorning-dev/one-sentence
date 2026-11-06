@@ -98,7 +98,6 @@ async function quote(b: Belief): Promise<VenueResult> {
     },
     warnings: [
       ...(thinBook ? [`Top of book holds only ${lower.askSize} / ${upper.bidSize} contracts; market makers price the real bet`] : []),
-      `Also pays part of it between $${lower.strike} and $${upper.strike}`,
       ...(upfront ? [`Needs $${upfront.toFixed(2)} in your Derive account for a moment: the lower call is bought first, the difference comes back seconds later`] : []),
     ],
   }

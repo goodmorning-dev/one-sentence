@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import type { Asset, VenueId } from '@/lib/venues/types'
+import { VENUE_COLOR } from './VenueIcon'
 
 export interface StrikeLine {
   venue: VenueId
@@ -113,10 +114,11 @@ const PAD = { top: 30, bottom: 30 }
 // Where the price has been, where it is now, and the line each bet needs it above when it's decided. The space
 // right of "now" runs toward the decision time, so the chart also shows how long is left. Ranges zoom the past;
 // hovering reads off any moment; the venue chips hide or show the other prices on offer.
-export function PriceChart({ asset, spot, settles, lines, highlight }: {
+export function PriceChart({ asset, spot, settles, payout, lines, highlight }: {
   asset: Asset
   spot: number | null
   settles: string
+  payout?: number // what the main bet pays if it wins, shown on the pin at the payout moment
   lines: StrikeLine[]
   highlight: VenueId | null
 }) {
@@ -261,6 +263,20 @@ export function PriceChart({ asset, spot, settles, lines, highlight }: {
     ? `${asset} is ${money(current)} now${change !== null ? `, ${change >= 0 ? 'up' : 'down'} ${Math.abs(change * 100).toFixed(1)}% over ${range.name}` : ''}. Your bet needs it above ${price(main.price)} on ${dateTime(decided)}.`
     : `${asset} price over the last ${range.name}.`
 
+  // The pin: where the main bet line meets the payout moment (or the right edge when that's further out). Its card
+  // goes above or below the line, whichever side covers less of the price path (and fits).
+  const pinX = xEnd
+  const pinY = main ? y(main.price) : 0
+  const CARD = { w: 190, h: 66 }
+  const covered = (top: number) =>
+    visible.filter((s) => x(s.t) > pinX - 10 - CARD.w && x(s.t) < pinX && y(s.p) > top && y(s.p) < top + CARD.h).length
+  const aboveTop = pinY - 14 - CARD.h
+  const belowTop = pinY + 14
+  const aboveFits = aboveTop >= 4
+  const belowFits = belowTop + CARD.h <= H - 4
+  const cardBelow = !aboveFits || (belowFits && covered(belowTop) < covered(aboveTop))
+  const cardTop = cardBelow ? belowTop : Math.max(pinY - 14, PAD.top + 4)
+
   const others = lines.filter((l) => !l.main)
   const zoomBtn = 'grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-raised hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent'
 
@@ -323,7 +339,7 @@ export function PriceChart({ asset, spot, settles, lines, highlight }: {
                 onMouseLeave={() => setHoverLine(null)}
                 className={`flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs transition ${on ? 'border-strong-line text-ink-2' : 'border-chip text-faint line-through'} ${l.main ? 'cursor-default' : 'hover:border-muted'}`}
               >
-                <span aria-hidden className={`h-0.5 w-3 rounded ${l.main ? 'bg-win' : on ? 'bg-muted' : 'bg-chip'}`} />
+                <span aria-hidden className={`h-0.5 w-3 rounded ${on ? '' : 'opacity-30'}`} style={{ background: VENUE_COLOR[l.venue] }} />
                 {l.label.split(' · ')[0]} {price(l.price)}
               </button>
             )
@@ -364,14 +380,14 @@ export function PriceChart({ asset, spot, settles, lines, highlight }: {
             {decisionInside ? (
               <>
                 <line x1={xEnd} x2={xEnd} y1={PAD.top} y2={H - PAD.bottom} className="stroke-strong-line" />
-                <text x={xEnd - 6} y={PAD.top - 9} textAnchor="end" className="fill-muted text-[11px]">Decided {dateTime(decided)}</text>
+                {!main && <text x={xEnd - 6} y={PAD.top - 9} textAnchor="end" className="fill-muted text-[11px]">Decided {dateTime(decided)}</text>}
               </>
             ) : (
-              <text x={plotR - 4} y={PAD.top - 9} textAnchor="end" className="fill-muted text-[11px]">Decided {dateTime(decided)} →</text>
+              !main && <text x={plotR - 4} y={PAD.top - 9} textAnchor="end" className="fill-muted text-[11px]">Decided {dateTime(decided)} →</text>
             )}
 
             {/* Each bet's price: the main one solid, the others dashed; hovered ones brighten. */}
-            {shown.map((l) => {
+            {[...shown].sort((a, b) => Number(a.main) - Number(b.main)).map((l) => {
               const on = l.main || active === l.venue
               return (
                 <line
@@ -380,21 +396,34 @@ export function PriceChart({ asset, spot, settles, lines, highlight }: {
                   x2={plotR}
                   y1={y(l.price)}
                   y2={y(l.price)}
-                  strokeWidth={on ? 2 : 1.25}
+                  stroke={VENUE_COLOR[l.venue]}
+                  strokeWidth={l.main ? 2.25 : on ? 2 : 1.25}
+                  strokeOpacity={on ? 1 : 0.55}
                   strokeDasharray={l.main ? undefined : '5 5'}
-                  className={l.main ? 'stroke-win' : on ? 'stroke-ink' : 'stroke-muted/70'}
                 />
               )
             })}
 
             {/* The price itself, a soft fill under it, and a dotted line from now to its tag on the right. */}
-            {area && <path d={area} className="fill-live/[0.07]" />}
-            <path d={path} fill="none" strokeWidth={2} strokeLinejoin="round" className="stroke-live" />
+            {area && <path d={area} className="fill-price/[0.05]" />}
+            <path d={path} fill="none" strokeWidth={2} strokeLinejoin="round" className="stroke-price" />
             {current && (
               <>
-                <line x1={xNow} x2={plotR} y1={y(current)} y2={y(current)} className="stroke-live/50" strokeDasharray="2 3" />
-                <circle cx={xNow} cy={y(current)} r={4.5} className="fill-live stroke-bg" strokeWidth={2} />
+                <line x1={xNow} x2={plotR} y1={y(current)} y2={y(current)} className="stroke-price/40" strokeDasharray="2 3" />
+                <circle cx={xNow} cy={y(current)} r={4.5} className="fill-price stroke-bg" strokeWidth={2} />
               </>
+            )}
+
+            {/* The pin: the moment and price the main bet is decided at. Off the right edge it becomes an arrow. */}
+            {main && (
+              <g pointerEvents="none">
+                <circle cx={pinX} cy={pinY} r={11} className="pin-pulse fill-win/20" />
+                {decisionInside ? (
+                  <circle cx={pinX} cy={pinY} r={6} className="fill-win stroke-bg" strokeWidth={2.5} />
+                ) : (
+                  <path d={`M${pinX - 7},${pinY - 7}L${pinX + 1},${pinY}L${pinX - 7},${pinY + 7}Z`} className="fill-win stroke-bg" strokeWidth={2} strokeLinejoin="round" />
+                )}
+              </g>
             )}
 
             {/* The right column: each price with its venue, and the live price as a tag, never overlapping. */}
@@ -403,8 +432,8 @@ export function PriceChart({ asset, spot, settles, lines, highlight }: {
                 const text = narrow ? money(current!) : `${asset} ${money(current!)}`
                 return (
                   <g key="spot">
-                    <line x1={plotR} x2={plotR + 8} y1={l.at} y2={l.ly} className="stroke-live/50" />
-                    <rect x={plotR + 8} y={l.ly - 10} width={Math.min(text.length * 6.8 + 14, right - 12)} height={20} rx={6} className="fill-live" />
+                    <line x1={plotR} x2={plotR + 8} y1={l.at} y2={l.ly} className="stroke-price/40" />
+                    <rect x={plotR + 8} y={l.ly - 10} width={Math.min(text.length * 6.8 + 14, right - 12)} height={20} rx={6} className="fill-price" />
                     <text x={plotR + 15} y={l.ly + 4} className="fill-bg text-[11.5px] font-semibold">{text}</text>
                   </g>
                 )
@@ -414,7 +443,7 @@ export function PriceChart({ asset, spot, settles, lines, highlight }: {
               return (
                 <g key={l.key} onMouseEnter={() => setHoverLine(line.venue)} onMouseLeave={() => setHoverLine(null)}>
                   <line x1={plotR} x2={plotR + 8} y1={l.at} y2={l.ly} className="stroke-line" />
-                  <text x={plotR + 12} y={l.ly - 2} className={`text-[13px] font-semibold ${line.main ? 'fill-win' : on ? 'fill-ink' : 'fill-ink-2'}`}>{price(line.price)}</text>
+                  <text x={plotR + 12} y={l.ly - 2} fill={VENUE_COLOR[line.venue]} fillOpacity={on ? 1 : 0.75} className="text-[13px] font-semibold">{price(line.price)}</text>
                   <text x={plotR + 12} y={l.ly + 12} className="fill-faint text-[11px]">{narrow ? line.label.split(' · ')[0] : line.label}</text>
                 </g>
               )
@@ -424,7 +453,7 @@ export function PriceChart({ asset, spot, settles, lines, highlight }: {
             {hover && hoverT !== null && (
               <g pointerEvents="none">
                 <line x1={hx} x2={hx} y1={PAD.top} y2={H - PAD.bottom} className="stroke-ink/40" />
-                {hoverPt && <circle cx={hx} cy={y(hoverPt.p)} r={4} className="fill-bg stroke-live" strokeWidth={2} />}
+                {hoverPt && <circle cx={hx} cy={y(hoverPt.p)} r={4} className="fill-bg stroke-price" strokeWidth={2} />}
               </g>
             )}
 
@@ -440,6 +469,23 @@ export function PriceChart({ asset, spot, settles, lines, highlight }: {
               onPointerLeave={(e) => e.pointerType !== 'touch' && setHover(null)}
             />
           </svg>
+        )}
+
+        {/* The pin's card: when it pays, what it pays and how long is left. Steps aside while the hover readout shows. */}
+        {ready && main && (
+          <div
+            className={`pointer-events-none absolute z-[5] flex w-max max-w-52 flex-col gap-0.5 rounded-xl border border-win/40 bg-surface/95 px-3 py-2 text-xs shadow-lg transition-opacity ${hover ? 'opacity-0' : ''}`}
+            style={{ left: pinX - 10, top: cardTop, transform: `translate(-100%, ${cardBelow ? '0' : '-100%'})` }}
+          >
+            <span className="flex items-center gap-1.5 font-medium text-win">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M5 21V4M5 4h11l-2 4 2 4H5" /></svg>
+              Payout {decisionInside ? '' : '→ '}{dateTime(decided)}
+            </span>
+            <span className="text-ink-2">
+              {payout ? <><strong className="font-semibold text-ink">{money(payout)}</strong> if {asset} is above {price(main.price)}</> : <>Wins if {asset} is above {price(main.price)}</>}
+            </span>
+            <span className="text-faint">{decided > now ? `In ${until(decided - now)}` : 'Being decided now'}</span>
+          </div>
         )}
 
         {/* Hover readout, as HTML so it stays readable; flips to the left of the cursor near the right edge. */}
