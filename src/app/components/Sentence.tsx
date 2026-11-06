@@ -4,7 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type 
 import { createPortal } from 'react-dom'
 import { day } from '@/lib/format'
 import { isoDate, nextFriday, type Sentence as S } from '@/lib/useBelief'
-import type { Asset } from '@/lib/venues/types'
+import type { Asset, Direction } from '@/lib/venues/types'
 import { TAGLINE } from './Logo'
 
 // Editable words: tinted, lime, dashed underline. They read as part of the sentence but clearly tappable.
@@ -14,6 +14,11 @@ const chip =
 const ASSETS: { id: Asset; name: string }[] = [
   { id: 'ETH', name: 'Ethereum' },
   { id: 'BTC', name: 'Bitcoin' },
+]
+
+const DIRECTIONS: { id: Direction; name: string }[] = [
+  { id: 'above', name: 'Ends higher than your price' },
+  { id: 'below', name: 'Ends lower than your price' },
 ]
 
 // Width follows the text so the sentence never shows a gap after the number. Digits are 1ch, separators ~0.3ch.
@@ -105,7 +110,7 @@ export function quickDates(now = new Date()) {
 }
 
 export function Sentence({ value, spot, onChange }: { value: S; spot: number | null; onChange: (patch: Partial<S>) => void }) {
-  const { asset, level, date, stake } = value
+  const { asset, direction, level, date, stake } = value
 
   return (
     <section aria-labelledby="sentence-h" className="flex max-w-[900px] flex-col gap-5 sm:gap-6">
@@ -117,7 +122,8 @@ export function Sentence({ value, spot, onChange }: { value: S; spot: number | n
       <p className="text-[30px] font-medium leading-[1.32] tracking-[-0.025em] text-ink sm:text-[52px] sm:leading-[1.22] sm:tracking-[-0.035em]">
         I think{' '}
         <AssetPicker value={asset} onChange={(a) => onChange({ asset: a })} />{' '}
-        will be above{' '}
+        will be{' '}
+        <DirectionPicker value={direction} onChange={(d) => onChange({ direction: d })} />{' '}
         <MoneyField label="Price level in dollars" value={level} onChange={(n) => onChange({ level: n })} />{' '}
         on{' '}
         <DatePicker value={date} onChange={(d) => onChange({ date: d })} />
@@ -126,7 +132,7 @@ export function Sentence({ value, spot, onChange }: { value: S; spot: number | n
         .
       </p>
 
-      <SpotLine asset={asset} level={level} spot={spot} />
+      <SpotLine asset={asset} direction={direction} level={level} spot={spot} />
 
       <div role="group" aria-label="Quick dates" className="flex flex-wrap gap-2">
         {quickDates().map((q) => (
@@ -260,6 +266,62 @@ function AssetPicker({ value, onChange }: { value: Asset; onChange: (a: Asset) =
               <span className="w-10 font-semibold">{a.id}</span>
               <span className="flex-1 text-muted">{a.name}</span>
               {a.id === value && <Check />}
+            </button>
+          ))}
+        </div>
+      </Panel>
+    </>
+  )
+}
+
+// "above" or "below" in the sentence, picked the same way as the coin.
+function DirectionPicker({ value, onChange }: { value: Direction; onChange: (d: Direction) => void }) {
+  const p = usePopover()
+  const options = useRef<(HTMLButtonElement | null)[]>([])
+
+  useEffect(() => {
+    if (p.open && p.pos) options.current[DIRECTIONS.findIndex((d) => d.id === value)]?.focus()
+  }, [p.open, p.pos, value])
+
+  const move = (e: KeyboardEvent) => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+    e.preventDefault()
+    const i = options.current.indexOf(document.activeElement as HTMLButtonElement)
+    options.current[(i + 1) % DIRECTIONS.length]?.focus()
+  }
+
+  return (
+    <>
+      <button
+        ref={p.anchor}
+        aria-label={`Direction: ${value}. Change`}
+        aria-haspopup="listbox"
+        aria-expanded={p.open}
+        onClick={() => p.setOpen(!p.open)}
+        className={`${chip} inline-flex items-center whitespace-nowrap`}
+      >
+        {value}
+        <Chevron open={p.open} />
+      </button>
+      <Panel p={p} label="Above or below" onKeyDown={move}>
+        <div role="listbox" aria-label="Direction" className="flex w-[22rem] max-w-[calc(100vw-2rem)] flex-col">
+          {DIRECTIONS.map((d, i) => (
+            <button
+              key={d.id}
+              ref={(el) => { options.current[i] = el }}
+              role="option"
+              aria-selected={d.id === value}
+              onClick={() => { onChange(d.id); p.close() }}
+              className={`flex min-h-12 items-center gap-3 rounded-xl px-3 text-left outline-none transition hover:bg-raised focus-visible:bg-raised ${d.id === value ? 'text-win' : ''}`}
+            >
+              <span aria-hidden className={`grid size-7 place-items-center rounded-lg ${d.id === value ? 'bg-win/15' : 'bg-chip'}`}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={d.id === 'below' ? 'rotate-180' : ''}>
+                  <path d="M12 19V5M5 12l7-7 7 7" />
+                </svg>
+              </span>
+              <span className="w-14 font-semibold">{d.id}</span>
+              <span className="flex-1 text-sm text-muted">{d.name}</span>
+              {d.id === value && <Check />}
             </button>
           ))}
         </div>
@@ -419,7 +481,7 @@ export function CoinIcon({ asset, size = 20 }: { asset: Asset; size?: number }) 
 }
 
 // Where the price is now against the one in the sentence, in plain words: how far it has to move for a win.
-function SpotLine({ asset, level, spot }: { asset: Asset; level: number; spot: number | null }) {
+function SpotLine({ asset, direction, level, spot }: { asset: Asset; direction: Direction; level: number; spot: number | null }) {
   if (!spot || !(level > 0)) return <p className="min-h-6" aria-hidden />
   const gap = (level - spot) / spot
   const pct = `${Math.abs(gap * 100).toFixed(1)}%`
@@ -432,6 +494,12 @@ function SpotLine({ asset, level, spot }: { asset: Asset; level: number; spot: n
       </span>
       {Math.abs(gap) < 0.001 ? (
         <span>Your price is right at it: a coin flip.</span>
+      ) : direction === 'below' ? (
+        gap < 0 ? (
+          <span>Your price is {pct} below, so it has to fall at least that much.</span>
+        ) : (
+          <span>Your price is {pct} above, so you win unless it rises more than that.</span>
+        )
       ) : gap < 0 ? (
         <span>Your price is {pct} below, so you win unless it falls more than that.</span>
       ) : (

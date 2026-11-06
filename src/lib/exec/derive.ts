@@ -15,7 +15,7 @@ import type { Executor, Funding, FundingSource, FundingState, Position, SellQuot
 //   1. add money: USDC goes to a deposit address Derive gives for this wallet, on Ethereum (from Arbitrum, Base,
 //      Optimism or Polygon it is moved there by Relay first); Derive sweeps it into the subaccount in minutes;
 //   2. approve a session key that lives in this browser: it can place option bets, never withdraw or transfer.
-// A bet buys a call spread. Small ones go on the order book as two fill-or-kill orders (the first is undone if the
+// A bet buys a call spread (above) or a put spread (below). Small ones go on the order book as two fill-or-kill orders (the first is undone if the
 // second misses); bigger than the top of book, it is one RFQ that market makers fill whole or not at all. Our
 // broker code (`referral_code`) rides on every order and RFQ; it is public, not a key.
 
@@ -348,13 +348,17 @@ async function open(wallet: WalletClient): Promise<VenueSession> {
   }
 }
 
-// The spread as RFQ legs, always from the buyer's side: long the lower call, short the upper one. Buying it opens a
-// bet; selling the same package closes it.
-const spreadLegs = (lower: string, upper: string, amount: string) =>
+// The spread as RFQ legs, always from the buyer's side: long one option, short the other (see DeriveTicket). Buying
+// it opens a bet; selling the same package closes it.
+const spreadLegs = (long: string, short: string, amount: string) =>
   sortLegs([
-    { instrument_name: lower, amount, direction: 'buy' as Direction },
-    { instrument_name: upper, amount, direction: 'sell' as Direction },
+    { instrument_name: long, amount, direction: 'buy' as Direction },
+    { instrument_name: short, amount, direction: 'sell' as Direction },
   ])
+
+// "ETH-20261127-2500-C" → "2500 call", for messages.
+const legName = (name: string) => `${name.split('-')[2]} ${name.endsWith('-P') ? 'put' : 'call'}`
+const isPut = (name: string) => name.endsWith('-P')
 
 type QuoteLeg = { instrument_name: string; amount: string; direction: Direction; price: string }
 type Best = {
@@ -460,8 +464,8 @@ async function takeQuote(owner: Address, key: PrivateKeyAccount, sub: number, di
 
 // ---- Orderbook path ----
 // Market makers don't answer RFQs this small, but the order book often holds far more than a small bet needs.
-// When both calls' top of book covers the whole amount, the spread trades there as two fill-or-kill orders: the
-// leg that can be held alone goes first (the bought call), and if the second one misses, the first is undone.
+// When both options' top of book covers the whole amount, the spread trades there as two fill-or-kill orders: the
+// leg that can be held alone goes first (the bought one), and if the second one misses, the first is undone.
 
 interface Ticker { a: string | null; A: string | null; b: string | null; B: string | null; I: string } // ask, ask size, bid, bid size, index
 const ticker = (name: string) => call<Ticker>('public/get_ticker', { instrument_name: name })
@@ -525,74 +529,74 @@ async function fok(owner: Address, key: PrivateKeyAccount, sub: number, name: st
 }
 const filled = (f: Fill | { error: string }): f is Fill => !('error' in f)
 
-// Both calls' top of book, when each covers the whole amount; null when the spread is too big for the book.
-async function bookFor(lower: string, upper: string, amount: number) {
-  const [lo, hi] = (await Promise.all([ticker(lower), ticker(upper)])).map(bookOf)
+// Both legs' top of book (`lo` the long leg, `hi` the short one), and whether each covers the whole amount.
+async function bookFor(long: string, short: string, amount: number) {
+  const [lo, hi] = (await Promise.all([ticker(long), ticker(short)])).map(bookOf)
   return { lo, hi, deepToBuy: lo.ask > 0 && lo.askSize >= amount && hi.bid > 0 && hi.bidSize >= amount, deepToSell: lo.bid > 0 && lo.bidSize >= amount && hi.ask > 0 && hi.askSize >= amount }
 }
 
 type Outcome = { ok: true; spent: number } | { ok: false; message: string }
 
-// Buys the lower call at the ask, then sells the upper one no cheaper than keeps the total within `maxCost`.
+// Buys the long leg at the ask, then sells the short one no cheaper than keeps the total within `maxCost`.
 async function buyOnBook(owner: Address, key: PrivateKeyAccount, sub: number, t: DeriveTicket, lo: Book, hi: Book): Promise<Outcome> {
   const n = Number(t.amount)
-  const [li, ui] = await Promise.all([instrument(t.lower), instrument(t.upper)])
-  const leg1 = await fok(owner, key, sub, t.lower, 'buy', t.amount, onTick(lo.ask, li.tick_size, true), lo.index)
-  if (!filled(leg1)) return { ok: false, message: `The ${t.lower.split('-')[2]} call didn’t fill (${leg1.error}). Nothing was spent. Try again.` }
-  // The upper call fills at the best bid; the limit only stops it selling for less than the stake allows.
+  const [li, ui] = await Promise.all([instrument(t.long), instrument(t.short)])
+  const leg1 = await fok(owner, key, sub, t.long, 'buy', t.amount, onTick(lo.ask, li.tick_size, true), lo.index)
+  if (!filled(leg1)) return { ok: false, message: `The ${legName(t.long)} didn’t fill (${leg1.error}). Nothing was spent. Try again.` }
+  // The short leg fills at the best bid; the limit only stops it selling for less than the stake allows.
   const paid = leg1.value + leg1.fee
   const least = Math.max(hi.bid * 0.9, (paid + orderFee(ui, hi.index, hi.bid, n) - t.maxCost) / n)
-  const leg2 = await fok(owner, key, sub, t.upper, 'sell', t.amount, onTick(least, ui.tick_size, true), hi.index)
+  const leg2 = await fok(owner, key, sub, t.short, 'sell', t.amount, onTick(least, ui.tick_size, true), hi.index)
   if (filled(leg2)) return { ok: true, spent: paid - leg2.value + leg2.fee }
   // Undo the first leg so the user isn't left holding half a spread.
-  const now = bookOf(await ticker(t.lower))
-  const back = await fok(owner, key, sub, t.lower, 'sell', t.amount, onTick(Math.max(now.bid * 0.9, Number(li.tick_size)), li.tick_size, false), now.index)
+  const now = bookOf(await ticker(t.long))
+  const back = await fok(owner, key, sub, t.long, 'sell', t.amount, onTick(Math.max(now.bid * 0.9, Number(li.tick_size)), li.tick_size, false), now.index)
   return filled(back)
-    ? { ok: false, message: `The ${t.upper.split('-')[2]} call didn’t sell (${leg2.error}), so the bet was undone. Undoing it cost ${usd(paid - back.value + back.fee)}. Try again.` }
-    : { ok: false, message: `The ${t.upper.split('-')[2]} call didn’t sell (${leg2.error}) and undoing the first part failed too. You hold ${t.amount} × ${t.lower} on Derive; it pays if ETH ends above $${t.lower.split('-')[2]}. Close it on app.derive.xyz if you don't want it.` }
+    ? { ok: false, message: `The ${legName(t.short)} didn’t sell (${leg2.error}), so the bet was undone. Undoing it cost ${usd(paid - back.value + back.fee)}. Try again.` }
+    : { ok: false, message: `The ${legName(t.short)} didn’t sell (${leg2.error}) and undoing the first part failed too. You hold ${t.amount} × ${t.long} on Derive; it pays if ${t.long.split('-')[0]} ends ${isPut(t.long) ? 'below' : 'above'} $${t.long.split('-')[2]}. Close it on app.derive.xyz if you don't want it.` }
 }
 
-// Buys back the upper call, then sells the lower one for at least what keeps the sale above `floor`.
-async function sellOnBook(owner: Address, key: PrivateKeyAccount, sub: number, lower: string, upper: string, amount: string, floor: number, lo: Book, hi: Book): Promise<{ ok: true; got: number } | { ok: false; message: string }> {
+// Buys back the short leg, then sells the long one for at least what keeps the sale above `floor`.
+async function sellOnBook(owner: Address, key: PrivateKeyAccount, sub: number, long: string, short: string, amount: string, floor: number, lo: Book, hi: Book): Promise<{ ok: true; got: number } | { ok: false; message: string }> {
   const n = Number(amount)
-  const [li, ui] = await Promise.all([instrument(lower), instrument(upper)])
-  const leg1 = await fok(owner, key, sub, upper, 'buy', amount, onTick(hi.ask, ui.tick_size, true), hi.index, SALE_LABEL)
-  if (!filled(leg1)) return { ok: false, message: `Buying back the ${upper.split('-')[2]} call didn’t fill (${leg1.error}). Nothing was sold. Try again.` }
+  const [li, ui] = await Promise.all([instrument(long), instrument(short)])
+  const leg1 = await fok(owner, key, sub, short, 'buy', amount, onTick(hi.ask, ui.tick_size, true), hi.index, SALE_LABEL)
+  if (!filled(leg1)) return { ok: false, message: `Buying back the ${legName(short)} didn’t fill (${leg1.error}). Nothing was sold. Try again.` }
   const owed = leg1.value + leg1.fee
   const least = Math.max(lo.bid * 0.9, (floor + owed + orderFee(li, lo.index, lo.bid, n)) / n)
-  const leg2 = await fok(owner, key, sub, lower, 'sell', amount, onTick(least, li.tick_size, true), lo.index, SALE_LABEL)
+  const leg2 = await fok(owner, key, sub, long, 'sell', amount, onTick(least, li.tick_size, true), lo.index, SALE_LABEL)
   if (filled(leg2)) return { ok: true, got: leg2.value - leg2.fee - owed }
-  // Put the upper call back so the bet is whole again.
-  const now = bookOf(await ticker(upper))
-  const back = await fok(owner, key, sub, upper, 'sell', amount, onTick(Math.max(now.bid * 0.9, Number(ui.tick_size)), ui.tick_size, false), now.index)
+  // Sell the short leg again so the bet is whole again.
+  const now = bookOf(await ticker(short))
+  const back = await fok(owner, key, sub, short, 'sell', amount, onTick(Math.max(now.bid * 0.9, Number(ui.tick_size)), ui.tick_size, false), now.index)
   return filled(back)
-    ? { ok: false, message: `The ${lower.split('-')[2]} call didn’t sell for enough (${leg2.error}), so the bet was put back as it was. That cost ${usd(owed - back.value + back.fee)}. Try again.` }
-    : { ok: false, message: `The ${lower.split('-')[2]} call didn’t sell (${leg2.error}). You now hold ${amount} × ${lower} without the ${upper.split('-')[2]} cap; it still pays if ETH ends higher. Sell it on app.derive.xyz if you want out.` }
+    ? { ok: false, message: `The ${legName(long)} didn’t sell for enough (${leg2.error}), so the bet was put back as it was. That cost ${usd(owed - back.value + back.fee)}. Try again.` }
+    : { ok: false, message: `The ${legName(long)} didn’t sell (${leg2.error}). You now hold ${amount} × ${long} without the ${short.split('-')[2]} cap; it still pays if ${long.split('-')[0]} ends ${isPut(long) ? 'lower' : 'higher'}. Sell it on app.derive.xyz if you want out.` }
 }
 
 // A bet: on the order book when it covers the whole amount and fits the stake, otherwise one RFQ to market makers.
 async function placeSpread(owner: Address, key: PrivateKeyAccount, sub: number, t: DeriveTicket, balance: number) {
   const n = Number(t.amount)
-  const { lo, hi, deepToBuy } = await bookFor(t.lower, t.upper, n)
+  const { lo, hi, deepToBuy } = await bookFor(t.long, t.short, n)
   const done = (spent: number) => ({
     ok: true,
-    message: `Bought ${t.amount} × the ${t.lower.split('-')[2]}/${t.upper.split('-')[2]} call spread for ${usd(spent)}`,
+    message: `Bought ${t.amount} × the ${t.long.split('-')[2]}/${t.short.split('-')[2]} ${isPut(t.long) ? 'put' : 'call'} spread for ${usd(spent)}`,
     filled: { spent, payout: n * t.width },
     link: LINK,
   })
   if (deepToBuy) {
-    const [li, ui] = await Promise.all([instrument(t.lower), instrument(t.upper)])
+    const [li, ui] = await Promise.all([instrument(t.long), instrument(t.short)])
     const cost = n * (lo.ask - hi.bid) + orderFee(li, lo.index, lo.ask, n) + orderFee(ui, hi.index, hi.bid, n)
     if (cost > t.maxCost + 0.005) return { ok: false, message: `Prices moved: it costs ${usd(cost)} now, above your ${usd(t.maxCost)}. Nothing was spent. Go back for a fresh quote.` }
-    // The lower call is paid in full before the upper one is sold, so the account has to cover it for a moment.
+    // The long leg is paid in full before the short one is sold, so the account has to cover it for a moment.
     const upfront = n * lo.ask + orderFee(li, lo.index, lo.ask, n)
     if (balance < upfront * 1.01) {
-      return { ok: false, message: `This needs ${usd(upfront * 1.01)} in your Derive account for a moment (the ${t.lower.split('-')[2]} call is bought before the ${t.upper.split('-')[2]} one is sold, and the difference comes back seconds later). You have ${usd(balance)}. Add the rest or bet less. Nothing was spent.` }
+      return { ok: false, message: `This needs ${usd(upfront * 1.01)} in your Derive account for a moment (the ${legName(t.long)} is bought before the ${legName(t.short)} is sold, and the difference comes back seconds later). You have ${usd(balance)}. Add the rest or bet less. Nothing was spent.` }
     }
     const r = await buyOnBook(owner, key, sub, t, lo, hi)
     return r.ok ? done(r.spent) : r
   }
-  const legs = spreadLegs(t.lower, t.upper, t.amount)
+  const legs = spreadLegs(t.long, t.short, t.amount)
   const p = await askMakers(owner, key, sub, legs, 'buy', (premium, fee) => premium + fee <= t.maxCost + 0.005, 20_000)
   if (!isPriced(p)) return { ok: false, message: `No offer fit your ${usd(t.maxCost)}. ${p.why} Nothing was spent.` }
   const { share, fee } = await takeQuote(owner, key, sub, 'buy', p)
@@ -600,17 +604,17 @@ async function placeSpread(owner: Address, key: PrivateKeyAccount, sub: number, 
   const contracts = n * share
   return {
     ok: true,
-    message: `Bought ${toPlain(contracts)} × the ${t.lower.split('-')[2]}/${t.upper.split('-')[2]} call spread for ${usd(p.premium * share + fee)}`,
+    message: `Bought ${toPlain(contracts)} × the ${t.long.split('-')[2]}/${t.short.split('-')[2]} ${isPut(t.long) ? 'put' : 'call'} spread for ${usd(p.premium * share + fee)}`,
     filled: { spent: p.premium * share + fee, payout: contracts * t.width },
     link: LINK,
   }
 }
 
 // A Derive bet's id carries what selling it needs: owner, subaccount and the two calls.
-const betId = (owner: string, sub: number, lower: string, upper: string) => [owner, sub, lower, upper].join('|')
+const betId = (owner: string, sub: number, long: string, short: string) => [owner, sub, long, short].join('|')
 function parseBetId(id: string) {
-  const [owner, sub, lower, upper] = id.split('|')
-  return { owner: owner as Address, sub: Number(sub), lower, upper }
+  const [owner, sub, long, short] = id.split('|')
+  return { owner: owner as Address, sub: Number(sub), long, short }
 }
 
 // Sales take a price no worse than this share of the one shown, since prices move before the sale is sent.
@@ -619,20 +623,20 @@ const SELL_FLOOR = 0.97
 // Read-only: what selling the whole spread pays right now, after fees: from the order book when it's deep enough,
 // otherwise from market makers (the RFQ it opens is cancelled again).
 async function sellQuote(p: Position): Promise<SellQuote> {
-  const { owner, sub, lower, upper } = parseBetId(p.id)
+  const { owner, sub, long, short } = parseBetId(p.id)
   const stored = loadKey(owner)
   if (!stored) throw new Error('Allow betting from here first (on the bet screen), so this browser can reach your Derive account')
   const key = privateKeyToAccount(stored.key)
   const n = p.shares
-  const { lo, hi, deepToSell } = await bookFor(lower, upper, n)
+  const { lo, hi, deepToSell } = await bookFor(long, short, n)
   let premium: number
   let fee: number
   if (deepToSell) {
-    const [li, ui] = await Promise.all([instrument(lower), instrument(upper)])
+    const [li, ui] = await Promise.all([instrument(long), instrument(short)])
     premium = n * (lo.bid - hi.ask)
     fee = orderFee(li, lo.index, lo.bid, n) + orderFee(ui, hi.index, hi.ask, n)
   } else {
-    const got = await askMakers(owner, key, sub, spreadLegs(lower, upper, toPlain(n)), 'sell', (x) => x > 0, 15_000)
+    const got = await askMakers(owner, key, sub, spreadLegs(long, short, toPlain(n)), 'sell', (x) => x > 0, 15_000)
     if (!isPriced(got)) throw new Error(`No one is buying this spread right now. ${got.why} Try again in a minute.`)
     await cancelRfq(owner, key, sub, got.rfqId)
     premium = got.premium
@@ -652,24 +656,24 @@ async function sellQuote(p: Position): Promise<SellQuote> {
   }
 }
 
-// Sells the whole spread, no lower than the floor priced in `q`: on the book when it's deep enough, else by RFQ.
+// Sells the whole spread, no long than the floor priced in `q`: on the book when it's deep enough, else by RFQ.
 async function sellSpread(owner: Address, p: Position, q: SellQuote) {
-  const { owner: holder, sub, lower, upper } = parseBetId(p.id)
+  const { owner: holder, sub, long, short } = parseBetId(p.id)
   if (holder.toLowerCase() !== owner.toLowerCase()) return { ok: false, message: 'This bet belongs to another wallet' }
   const stored = loadKey(owner)
   if (!stored) return { ok: false, message: 'Allow betting from here first' }
   const key = privateKeyToAccount(stored.key)
   const floor = Number(q.limit)
   const amount = toPlain(p.shares)
-  const { lo, hi, deepToSell } = await bookFor(lower, upper, p.shares)
+  const { lo, hi, deepToSell } = await bookFor(long, short, p.shares)
   if (deepToSell) {
-    const [li, ui] = await Promise.all([instrument(lower), instrument(upper)])
+    const [li, ui] = await Promise.all([instrument(long), instrument(short)])
     const now = p.shares * (lo.bid - hi.ask) - orderFee(li, lo.index, lo.bid, p.shares) - orderFee(ui, hi.index, hi.ask, p.shares)
     if (now < floor - 0.005) return { ok: false, message: `Prices moved: it would pay ${usd(now)} now, under ${usd(floor)}. Nothing was sold.` }
-    const r = await sellOnBook(owner, key, sub, lower, upper, amount, floor, lo, hi)
+    const r = await sellOnBook(owner, key, sub, long, short, amount, floor, lo, hi)
     return r.ok ? { ok: true, message: `Sold for ${usd(r.got)}`, link: LINK } : r
   }
-  const legs = spreadLegs(lower, upper, amount)
+  const legs = spreadLegs(long, short, amount)
   const got = await askMakers(owner, key, sub, legs, 'sell', (premium, fee) => premium - fee >= floor - 0.005, 20_000)
   if (!isPriced(got)) return { ok: false, message: `No one paid at least ${usd(floor)}. ${got.why} Nothing was sold.` }
   const { share, fee } = await takeQuote(owner, key, sub, 'sell', got)
@@ -683,19 +687,24 @@ function parseName(name: string) {
   return { asset, date: `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}`, strike: Number(strike), kind }
 }
 
-// A long call paired with a short call of the same subaccount, expiry and size is one bet; anything else in the
+// Whether `short` is the far leg of a spread opened with `long`: the same kind, asset and expiry, with the short
+// strike past the long one in the bet's direction (higher for calls, long for puts).
+function spreadOf(long: string, short: string) {
+  const a = parseName(long)
+  const b = parseName(short)
+  return a.kind === b.kind && (a.kind === 'C' || a.kind === 'P') && a.asset === b.asset && a.date === b.date
+    && (a.kind === 'P' ? b.strike < a.strike : b.strike > a.strike)
+}
+
+// A long option paired with a short one of the same subaccount, expiry and size is one bet; anything else in the
 // account is left out, it wasn't placed here.
 interface Leg { sub: number; name: string; amount: number }
 function pairSpreads<T extends Leg>(legs: T[]): [T, T][] {
-  const calls = legs.filter((l) => l.name.endsWith('-C'))
-  const shorts = calls.filter((l) => l.amount < 0)
+  const options = legs.filter((l) => /-[CP]$/.test(l.name))
+  const shorts = options.filter((l) => l.amount < 0)
   const pairs: [T, T][] = []
-  for (const l of calls.filter((x) => x.amount > 0)) {
-    const lp = parseName(l.name)
-    const s = shorts.find((x) => {
-      const sp = parseName(x.name)
-      return x.sub === l.sub && sp.asset === lp.asset && sp.date === lp.date && sp.strike > lp.strike && Math.abs(x.amount + l.amount) < 1e-9
-    })
+  for (const l of options.filter((x) => x.amount > 0)) {
+    const s = shorts.find((x) => x.sub === l.sub && spreadOf(l.name, x.name) && Math.abs(x.amount + l.amount) < 1e-9)
     if (!s) continue
     shorts.splice(shorts.indexOf(s), 1)
     pairs.push([l, s])
@@ -710,10 +719,10 @@ function asBet(owner: string, l: Leg, s: Leg, rest: Pick<Position, 'cost' | 'val
   return {
     venue: 'derive',
     id: betId(owner, l.sub, l.name, s.name),
-    title: `${lp.asset} above $${sp.strike.toLocaleString('en-US')} on ${when}`,
+    title: `${lp.asset} ${lp.kind === 'P' ? 'below' : 'above'} $${sp.strike.toLocaleString('en-US')} on ${when}`,
     outcome: 'Yes',
     shares: l.amount,
-    payoutIfRight: l.amount * (sp.strike - lp.strike),
+    payoutIfRight: l.amount * Math.abs(sp.strike - lp.strike),
     ends: `${lp.date}T08:00:00Z`,
     link: LINK,
     ...rest,
@@ -743,7 +752,7 @@ async function positions(owner: `0x${string}`): Promise<Position[]> {
     const value = Number(l.mark_value) + Number(s.mark_value)
     return asBet(owner, l, s, { cost, value, pnl: value - cost, status: 'live' })
   })
-  // At expiry each call pays its value in cash; the spread paid the sum. Derive's settlement P&L includes fees.
+  // At expiry each option pays its value in cash; the spread paid the sum. Derive's settlement P&L includes fees.
   const done = pairSpreads(settled).map(([l, s]) => {
     const value = Number(l.settlement_value) + Number(s.settlement_value)
     const known = l.option_settlement_pnl != null && s.option_settlement_pnl != null
@@ -760,7 +769,7 @@ interface Trade {
 // One order's (or one RFQ leg's) trades added up.
 interface LegFill { id: string; rfq: string | null; label: string | null; sub: number; name: string; direction: Direction; amount: number; value: number; fee: number; pnl: number; time: number }
 
-// Spreads sold back before expiry: the lower call sold and the upper one bought back, the same size. A sale made
+// Spreads sold back before expiry: the long leg sold and the short one bought back, the same size. A sale made
 // by RFQ is one RFQ with both legs; one made on the order book is two orders placed moments apart. Derive's
 // realized P&L on those trades (fees included) says how it went.
 async function soldEarly(owner: Address, key: PrivateKeyAccount): Promise<Position[]> {
@@ -775,7 +784,7 @@ async function soldEarly(owner: Address, key: PrivateKeyAccount): Promise<Positi
   }
   const fills = new Map<string, LegFill>()
   for (const t of trades) {
-    if (!t.instrument_name.endsWith('-C')) continue
+    if (!/-[CP]$/.test(t.instrument_name)) continue
     const id = t.rfq_id ? `${t.rfq_id}:${t.instrument_name}` : t.order_id
     const f = fills.get(id) ?? { id, rfq: t.rfq_id, label: t.label, sub: t.subaccount_id, name: t.instrument_name, direction: t.direction, amount: 0, value: 0, fee: 0, pnl: 0, time: t.timestamp }
     const n = Math.abs(Number(t.trade_amount))
@@ -787,23 +796,20 @@ async function soldEarly(owner: Address, key: PrivateKeyAccount): Promise<Positi
     fills.set(id, f)
   }
 
-  // The lower call sold and a higher one of the same expiry bought back, same size and subaccount.
-  const closes = (lo: LegFill, hi: LegFill) => {
-    const lp = parseName(lo.name)
-    const hp = parseName(hi.name)
-    return lo.direction === 'sell' && hi.direction === 'buy' && lp.asset === hp.asset && lp.date === hp.date
-      && lp.strike < hp.strike && lo.sub === hi.sub && Math.abs(lo.amount - hi.amount) < 1e-9
-  }
+  // The long leg sold and its short leg bought back, same size and subaccount.
+  const closes = (lo: LegFill, hi: LegFill) =>
+    lo.direction === 'sell' && hi.direction === 'buy' && spreadOf(lo.name, hi.name) && lo.sub === hi.sub && Math.abs(lo.amount - hi.amount) < 1e-9
   const pairs: [LegFill, LegFill][] = []
   const all = [...fills.values()]
   const byRfq = new Map<string, LegFill[]>()
   for (const f of all) if (f.rfq) byRfq.set(f.rfq, [...(byRfq.get(f.rfq) ?? []), f])
   for (const legs of byRfq.values()) {
     if (legs.length !== 2) continue
-    const [lo, hi] = [...legs].sort((a, b) => parseName(a.name).strike - parseName(b.name).strike)
-    if (closes(lo, hi)) pairs.push([lo, hi])
+    const lo = legs.find((l) => l.direction === 'sell')
+    const hi = legs.find((l) => l.direction === 'buy')
+    if (lo && hi && closes(lo, hi)) pairs.push([lo, hi])
   }
-  // Orderbook sales: both orders carry the sale label; the upper call is bought back first, the lower sold seconds later.
+  // Orderbook sales: both orders carry the sale label; the short leg is bought back first, the long one sold seconds later.
   const book = all.filter((f) => !f.rfq && f.label === SALE_LABEL).sort((a, b) => a.time - b.time)
   const used = new Set<string>()
   for (const lo of book) {

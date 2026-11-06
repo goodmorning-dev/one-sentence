@@ -3,7 +3,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { executors } from '@/lib/exec'
 import { chanceWords, day, usd, when } from '@/lib/format'
-import type { Asset, Quote, Unavailable, VenueId, VenueResult } from '@/lib/venues/types'
+import type { Asset, Direction, Quote, Unavailable, VenueId, VenueResult } from '@/lib/venues/types'
 import { Dialog } from './Dialog'
 import { PriceChart } from './PriceChart'
 import { VenueIcon, venueStyle } from './VenueIcon'
@@ -36,10 +36,11 @@ export function Quotes(props: {
   onTry: (patch: { level?: number; date?: string }) => void
   onPick: (venue: VenueId) => void
   level: number
+  direction: Direction
   spot: number | null
   asset: Asset
 }) {
-  const { data, incomplete, loading, failed, updatedAt, stake, level, spot, asset, onRetry, onTry, onPick } = props
+  const { data, incomplete, loading, failed, updatedAt, stake, level, direction, spot, asset, onRetry, onTry, onPick } = props
   const [hover, setHover] = useState<VenueId | null>(null)
 
   if (incomplete) {
@@ -118,7 +119,7 @@ export function Quotes(props: {
                   <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                     <span className="text-xs font-medium uppercase tracking-[0.06em] text-faint">Try instead</span>
                     <span className="text-[17px] font-semibold text-ink">
-                      {asset} above <span className="text-win">{usd(o.suggest.level, 0)}</span>
+                      {asset} {direction} <span className="text-win">{usd(o.suggest.level, 0)}</span>
                     </span>
                     <span className="text-[13px] text-muted">on {day(o.suggest.date).replace(',', '')} · via {VENUE_NAMES[o.venue]}</span>
                   </span>
@@ -187,7 +188,7 @@ export function Quotes(props: {
           <span className="flex items-start gap-3 text-sm leading-normal text-ink-2">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden className="mt-px flex-none text-live"><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></svg>
             <span>
-              Nobody offers exactly {fmt(level)}. The closest bet is <strong className="font-semibold text-ink">above {fmt(strike)}</strong>
+              Nobody offers exactly {fmt(level)}. The closest bet is <strong className="font-semibold text-ink">{direction} {fmt(strike)}</strong>
               <span className="text-faint"> ({strike > level ? '+' : '−'}{fmt(Math.abs(strike - level))})</span>, and the offers below are for that.
             </span>
           </span>
@@ -224,6 +225,7 @@ export function Quotes(props: {
           spot={spot}
           settles={lead.settles}
           payout={lead.payoutIfRight}
+          direction={lead.direction}
           highlight={hover}
           lines={[...same, ...others].map((q) => ({ venue: q.venue, price: q.actualLevel, main: q === lead, label: `${VENUE_NAMES[q.venue]} · ${pct(q.impliedChance)}` }))}
         />
@@ -320,7 +322,7 @@ function Offer({ q, asset, stake, checked, best, onPick }: {
           <p className="relative flex items-start gap-2.5 text-[16px] leading-snug text-ink-2">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="mt-0.5 flex-none text-(--venue)"><path d="M4 21V4M4 4h12l-2 4 2 4H4" /></svg>
             <span>
-              If {asset} is above <strong className="font-semibold text-ink">{money(q.actualLevel)}</strong> on <strong className="font-semibold text-ink">{when(q.settles)}</strong>, you get
+              If {asset} is {q.direction} <strong className="font-semibold text-ink">{money(q.actualLevel)}</strong> on <strong className="font-semibold text-ink">{when(q.settles)}</strong>, you get
             </span>
           </p>
           <div className="relative flex flex-wrap items-baseline gap-x-3 gap-y-2">
@@ -499,7 +501,7 @@ function OtherOffer({ q, lead, asset, best, other, stake, onPick, onHover }: {
 
       <p className="flex flex-col gap-1 rounded-xl bg-bg/50 px-3.5 py-2.5 text-sm leading-snug text-ink-2">
         <span>
-          If {asset} is above <strong className="font-semibold text-ink">{money(q.actualLevel)}</strong>
+          If {asset} is {q.direction} <strong className="font-semibold text-ink">{money(q.actualLevel)}</strong>
         </span>
         {other && (
           <span className="text-[13px] text-live-ink">
@@ -566,9 +568,9 @@ function ChanceHint() {
 }
 
 // What each venue is and what you're actually buying there, in plain words.
-const VENUE_ABOUT: Record<VenueId, { what: string; points: string[] }> = {
+const VENUE_ABOUT: Record<VenueId, { what: (d: Direction) => string; points: string[] }> = {
   derive: {
-    what: 'An options exchange. Derive has no yes/no bets, so we build yours from two call options that together pay a fixed amount if the price ends above your level.',
+    what: (d) => `An options exchange. Derive has no yes/no bets, so we build yours from two ${d === 'below' ? 'put' : 'call'} options that together pay a fixed amount if the price ends ${d} your level.`,
     points: [
       'Money sits in your own Derive account, in USDC.',
       'It settles by itself at the expiry and the payout lands in that account.',
@@ -576,7 +578,7 @@ const VENUE_ABOUT: Record<VenueId, { what: string; points: string[] }> = {
     ],
   },
   polymarket: {
-    what: 'A prediction market. You buy "Yes" shares on a question like "ETH above $X on that day?". Each share pays $1 if the answer is yes and nothing if not.',
+    what: (d) => `A prediction market. You buy "${d === 'below' ? 'No' : 'Yes'}" shares on a question like "ETH above $X on that day?". Each share pays $1 if the answer is ${d === 'below' ? 'no' : 'yes'} and nothing if not.`,
     points: [
       'The share price is what the crowd thinks the chance is.',
       'Paid in USDC on Polygon: each winning share is worth $1 once the market is resolved.',
@@ -584,7 +586,7 @@ const VENUE_ABOUT: Record<VenueId, { what: string; points: string[] }> = {
     ],
   },
   hyperliquid: {
-    what: 'An exchange with yes/no outcome markets on prices. You buy "Yes" on the outcome; it pays out if the price is above the level at the set time.',
+    what: (d) => `An exchange with yes/no outcome markets on prices. You buy "${d === 'below' ? 'No' : 'Yes'}" on the outcome; it pays out if the price is ${d === 'below' ? 'not above' : 'above'} the level at the set time.`,
     points: [
       'Money sits in your Hyperliquid account, in USDC.',
       'Settles by itself at the set time and pays into that account.',
@@ -613,7 +615,7 @@ function VenueInfo({ q, className = '' }: { q: Quote; className?: string }) {
           <div style={venueStyle(q.venue)} className="flex flex-col gap-4">
             <div className="flex items-start gap-3 rounded-2xl border border-(--venue)/25 bg-(--venue)/[0.06] p-4">
               <VenueIcon venue={q.venue} size={36} />
-              <p className="text-[14px] leading-relaxed text-ink-2">{about.what}</p>
+              <p className="text-[14px] leading-relaxed text-ink-2">{about.what(q.direction)}</p>
             </div>
             <ul className="flex flex-col gap-2 text-[14px] leading-snug text-ink-2">
               {about.points.map((p) => (

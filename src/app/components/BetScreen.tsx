@@ -28,7 +28,7 @@ export function BetScreen({ quote, asset, better, onBack, onSwitch, onTraded }: 
       <div className="flex flex-col gap-2">
         <span className="text-sm text-muted">Placing your bet on {name}</span>
         <p className="text-[26px] font-medium leading-[1.3] tracking-[-0.025em] sm:text-[30px]">
-          {asset} above <span className="text-win">{usd(quote.actualLevel, quote.actualLevel % 1 ? 2 : 0)}</span> on <span className="text-win">{day(quote.settles)}</span>
+          {asset} {quote.direction} <span className="text-win">{usd(quote.actualLevel, quote.actualLevel % 1 ? 2 : 0)}</span> on <span className="text-win">{day(quote.settles)}</span>
         </p>
       </div>
 

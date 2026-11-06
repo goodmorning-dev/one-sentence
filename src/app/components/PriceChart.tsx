@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import type { Asset, VenueId } from '@/lib/venues/types'
+import type { Asset, Direction, VenueId } from '@/lib/venues/types'
 import { VENUE_COLOR } from './VenueIcon'
 
 export interface StrikeLine {
@@ -111,14 +111,15 @@ function nearest(series: Pt[], t: number) {
 const H = 264
 const PAD = { top: 30, bottom: 30 }
 
-// Where the price has been, where it is now, and the line each bet needs it above when it's decided. The space
+// Where the price has been, where it is now, and the line each bet needs it past when it's decided. The space
 // right of "now" runs toward the decision time, so the chart also shows how long is left. Ranges zoom the past;
 // hovering reads off any moment; the venue chips hide or show the other prices on offer.
-export function PriceChart({ asset, spot, settles, payout, lines, highlight }: {
+export function PriceChart({ asset, spot, settles, payout, direction = 'above', lines, highlight }: {
   asset: Asset
   spot: number | null
   settles: string
   payout?: number // what the main bet pays if it wins, shown on the pin at the payout moment
+  direction?: Direction // which side of the lines wins
   lines: StrikeLine[]
   highlight: VenueId | null
 }) {
@@ -196,8 +197,10 @@ export function PriceChart({ asset, spot, settles, payout, lines, highlight }: {
   const pMin = prices.length ? Math.min(...prices) : 0
   const pMax = prices.length ? Math.max(...prices) : 1
   const span = pMax - pMin || pMax * 0.01 || 1
-  const lo = pMin - span * 0.12
-  const hi = pMax + span * 0.12
+  // The winning side of the main line always gets some room, so "You win up/down here" never shrinks to a sliver.
+  const winLine = lines.find((l) => l.main)?.price
+  const lo = Math.min(pMin - span * 0.12, direction === 'below' && winLine !== undefined ? winLine - span * 0.25 : Infinity)
+  const hi = Math.max(pMax + span * 0.12, direction === 'above' && winLine !== undefined ? winLine + span * 0.25 : -Infinity)
 
   const yStep = niceStep(hi - lo, 4)
   const yTicks: number[] = []
@@ -260,7 +263,7 @@ export function PriceChart({ asset, spot, settles, payout, lines, highlight }: {
   const price = (n: number) => money(n, n % 1 !== 0)
 
   const summary = current && main
-    ? `${asset} is ${money(current)} now${change !== null ? `, ${change >= 0 ? 'up' : 'down'} ${Math.abs(change * 100).toFixed(1)}% over ${range.name}` : ''}. Your bet needs it above ${price(main.price)} on ${dateTime(decided)}.`
+    ? `${asset} is ${money(current)} now${change !== null ? `, ${change >= 0 ? 'up' : 'down'} ${Math.abs(change * 100).toFixed(1)}% over ${range.name}` : ''}. Your bet needs it ${direction} ${price(main.price)} on ${dateTime(decided)}.`
     : `${asset} price over the last ${range.name}.`
 
   // The pin: where the main bet line meets the payout moment (or the right edge when that's further out). Its card
@@ -363,9 +366,17 @@ export function PriceChart({ asset, spot, settles, payout, lines, highlight }: {
 
             {/* The future, lightly shaded, and the zone where the main bet wins. */}
             <rect x={xNow} y={PAD.top} width={Math.max(0, plotR - xNow)} height={H - PAD.top - PAD.bottom} className="fill-raised/50" />
-            {main && <rect x={left} y={PAD.top} width={xEnd - left} height={Math.max(0, y(main.price) - PAD.top)} className="fill-win/[0.06]" />}
-            {main && y(main.price) - PAD.top > 18 && (
-              <text x={left + 8} y={PAD.top + 14} className="fill-win/70 text-[11px]">You win up here</text>
+            {main && direction === 'above' && (
+              <>
+                <rect x={left} y={PAD.top} width={xEnd - left} height={Math.max(0, y(main.price) - PAD.top)} className="fill-win/[0.06]" />
+                {y(main.price) - PAD.top > 18 && <text x={left + 8} y={PAD.top + 14} className="fill-win/70 text-[11px]">You win up here</text>}
+              </>
+            )}
+            {main && direction === 'below' && (
+              <>
+                <rect x={left} y={y(main.price)} width={xEnd - left} height={Math.max(0, H - PAD.bottom - y(main.price))} className="fill-win/[0.06]" />
+                {H - PAD.bottom - y(main.price) > 18 && <text x={left + 8} y={H - PAD.bottom - 8} className="fill-win/70 text-[11px]">You win down here</text>}
+              </>
             )}
 
             {/* Time: dates and times along the bottom, "now", and the decision. */}
@@ -482,7 +493,7 @@ export function PriceChart({ asset, spot, settles, payout, lines, highlight }: {
               Payout {decisionInside ? '' : '→ '}{dateTime(decided)}
             </span>
             <span className="text-ink-2">
-              {payout ? <><strong className="font-semibold text-ink">{money(payout)}</strong> if {asset} is above {price(main.price)}</> : <>Wins if {asset} is above {price(main.price)}</>}
+              {payout ? <><strong className="font-semibold text-ink">{money(payout)}</strong> if {asset} is {direction} {price(main.price)}</> : <>Wins if {asset} is {direction} {price(main.price)}</>}
             </span>
             <span className="text-faint">{decided > now ? `In ${until(decided - now)}` : 'Being decided now'}</span>
           </div>
@@ -499,7 +510,7 @@ export function PriceChart({ asset, spot, settles, payout, lines, highlight }: {
                 <span className="text-faint">{dateTime(hoverPt.t)}</span>
                 <span className="text-sm font-semibold text-ink">{asset} {money(hoverPt.p)}</span>
                 {main && (
-                  <span className={hoverPt.p > main.price ? 'text-win' : 'text-lose'}>
+                  <span className={(hoverPt.p > main.price) === (direction === 'above') ? 'text-win' : 'text-lose'}>
                     {Math.abs(((hoverPt.p - main.price) / main.price) * 100).toFixed(1)}% {hoverPt.p > main.price ? 'above' : 'below'} your {price(main.price)}
                   </span>
                 )}
@@ -512,7 +523,7 @@ export function PriceChart({ asset, spot, settles, payout, lines, highlight }: {
             )}
             {lineUnder && (
               <span className="mt-1 border-t border-chip pt-1 text-ink-2">
-                {lineUnder.main ? 'Your bet' : lineUnder.label.split(' · ')[0]} wins above {price(lineUnder.price)}
+                {lineUnder.main ? 'Your bet' : lineUnder.label.split(' · ')[0]} wins {direction} {price(lineUnder.price)}
               </span>
             )}
           </div>

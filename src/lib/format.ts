@@ -29,6 +29,15 @@ export function shortTitle(t: string) {
   return m ? `${SYMBOLS[m[1]] ?? m[1]} above $${m[2]} on ${m[3]}` : t
 }
 
+// A bet's name as the user said it. "No" on "ETH above $2,000" is the "below" bet, so it reads that way; any other
+// outcome that isn't a plain "Yes" keeps its name after the title.
+export function betTitle(p: { title: string; outcome: string }) {
+  const t = shortTitle(p.title)
+  if (p.outcome === 'Yes') return t
+  if (p.outcome === 'No' && / above \$/.test(t)) return t.replace(' above $', ' below $')
+  return `${t} · ${p.outcome}`
+}
+
 // SDKs wrap wallet errors ("Failed to sign the typed data") and keep the real one in `cause`. Collect the chain,
 // innermost last, preferring viem's one-line `shortMessage`, so the UI can show what actually went wrong.
 export function errorChain(e: unknown): string[] {

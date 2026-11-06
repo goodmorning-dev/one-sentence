@@ -134,7 +134,7 @@ export function TradePanel({ quote, venueName, onClose, onTraded }: {
 
   const steps = account?.steps ?? [{ id: 'wallet', label: '', done: false, runnable: false }]
   const current = steps.find((s) => !s.done)
-  // Derive's order book buys the lower call before selling the upper one, so the account needs its full price briefly.
+  // Derive's order book buys one option before selling the other, so the account needs its full price briefly.
   const upfront = quote.ticket?.venue === 'derive' ? quote.ticket.upfront || 0 : 0
   const need = Math.max(quote.cost, upfront)
   const enough = account?.balance != null && account.balance >= need
@@ -202,7 +202,7 @@ export function TradePanel({ quote, venueName, onClose, onTraded }: {
 
       {fundingNeeded && upfront > quote.cost && !current && (
         <p className="-mt-2 text-sm leading-normal text-muted">
-          This bet needs {usd(upfront)} in your {venueName} account for a moment: it buys the lower call first, then sells the upper one and the
+          This bet needs {usd(upfront)} in your {venueName} account for a moment: it buys one option first, then sells the other and the
           difference comes straight back. You have {usd(account?.balance ?? 0)}.
         </p>
       )}

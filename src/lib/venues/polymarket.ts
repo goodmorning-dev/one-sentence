@@ -9,7 +9,7 @@ const CRYPTO_FEE_RATE = 0.07
 const ASSET_NAMES = { ETH: 'ethereum', BTC: 'bitcoin' } as const
 
 interface GammaMarket {
-  question: string; groupItemTitle: string; bestAsk: number; closed: boolean; endDate: string; orderMinSize: number; feesEnabled: boolean
+  question: string; groupItemTitle: string; bestAsk: number; bestBid: number; closed: boolean; endDate: string; orderMinSize: number; feesEnabled: boolean
   clobTokenIds: string; acceptingOrders: boolean; feeSchedule?: { rate: number }; orderPriceMinTickSize: number
 }
 interface GammaEvent { slug: string; closed: boolean; restricted: boolean; markets: GammaMarket[] }
@@ -19,8 +19,11 @@ export interface BookLevel { price: string | number; size: string | number }
 const money = (n: number) => `$${n.toFixed(2)}`
 const ESTIMATE_WARNING = 'Estimated from the last price; the order book has not been checked yet'
 
-// Polymarket lists "Ethereum above ___ on <Month> <day>?" events with one YES/NO market per strike.
+// Polymarket lists "Ethereum above ___ on <Month> <day>?" events with one YES/NO market per strike. "Above" buys
+// YES on the strike at or just past the sentence's price; "below" buys NO on the one at or just under it, which pays
+// when the price is not above that strike.
 async function quote(b: Belief): Promise<VenueResult> {
+  const below = b.direction === 'below'
   const d = new Date(`${b.date}T00:00:00Z`)
   const month = d.toLocaleString('en-US', { month: 'long', timeZone: 'UTC' }).toLowerCase()
   const slug = `${ASSET_NAMES[b.asset]}-above-on-${month}-${d.getUTCDate()}-${d.getUTCFullYear()}`
@@ -29,29 +32,33 @@ async function quote(b: Belief): Promise<VenueResult> {
   const event = events[0]
   if (!event || event.closed) return { venue: 'polymarket', available: false, reason: `No open "${b.asset} above" event for ${b.date}` }
 
-  const m = event.markets
-    .filter((x) => !x.closed && x.bestAsk > 0)
+  // The price of the side we buy: YES at its ask, NO at one minus YES's bid.
+  const askOf = (x: GammaMarket) => (below ? (Number(x.bestBid) > 0 ? 1 - Number(x.bestBid) : 0) : Number(x.bestAsk))
+  const strikes = event.markets
+    .filter((x) => !x.closed && askOf(x) > 0 && askOf(x) < 1)
     .map((x) => ({ ...x, strike: Number(String(x.groupItemTitle).replace(/[^0-9.]/g, '')) }))
     .sort((x, y) => x.strike - y.strike)
-    .find((x) => x.strike >= b.level)
-  if (!m) return { venue: 'polymarket', available: false, reason: `No strike at or above $${b.level}`, link }
+  const m = below ? strikes.findLast((x) => x.strike <= b.level) : strikes.find((x) => x.strike >= b.level)
+  if (!m) return { venue: 'polymarket', available: false, reason: `No strike at or ${b.direction} $${b.level}`, link }
   if (!m.acceptingOrders) return { venue: 'polymarket', available: false, reason: 'This market is not taking orders right now', link }
 
   // Gamma's bestAsk is a lagging summary: good enough to find the market, never to price the bet.
-  const p = Number(m.bestAsk)
+  const p = +askOf(m).toFixed(4)
   const feeRate = m.feesEnabled ? (m.feeSchedule?.rate ?? CRYPTO_FEE_RATE) : 0
   const shares = b.stake / (p + feeRate * p * (1 - p))
-  const tokenId: string = JSON.parse(m.clobTokenIds)[0]
+  const tokenId: string = JSON.parse(m.clobTokenIds)[below ? 1 : 0]
+  const side = below ? 'NO' : 'YES'
   const estimate: Quote = {
     venue: 'polymarket',
     available: true,
+    direction: b.direction,
     actualLevel: m.strike,
     settles: m.endDate,
-    priceSource: `Binance ${b.asset}/USDT 1-min candle close at 12:00 ET, strictly higher`,
+    priceSource: `Binance ${b.asset}/USDT 1-min candle close at 12:00 ET, ${below ? 'at or under' : 'strictly higher'}`,
     cost: b.stake,
     payoutIfRight: shares,
     impliedChance: p,
-    how: `Buy about ${shares.toFixed(2)} YES "${m.question}" @ ${p}`,
+    how: `Buy about ${shares.toFixed(2)} ${side} "${m.question}" @ ${p}`,
     link,
     warnings: [ESTIMATE_WARNING, ...(event.restricted ? ['Blocked for orders in about 33 countries'] : [])],
     ticket: {
@@ -76,7 +83,7 @@ async function quote(b: Belief): Promise<VenueResult> {
   }
 }
 
-// Buys YES from the cheapest ask upwards, spending at most `budget` including the taker fee at each price.
+// Buys shares from the cheapest ask upwards, spending at most `budget` including the taker fee at each price.
 export function fillFromBook(asks: BookLevel[], budget: number, feeRate: number) {
   const levels = asks.map((a) => ({ price: Number(a.price), size: Number(a.size) })).filter((a) => a.price > 0 && a.size > 0)
   levels.sort((a, b) => a.price - b.price)
@@ -110,7 +117,7 @@ export function priceFromBook(q: Quote, asks: BookLevel[]): VenueResult {
     cost: short > 0.01 ? f.spent : t.stake, // float dust from the walk is not a partial fill
     payoutIfRight: f.shares,
     impliedChance: f.best,
-    how: `Buy ${f.shares.toFixed(2)} YES @ ${avg.toFixed(4)} average incl. fee (from ${f.best} up to ${f.worst})`,
+    how: `Buy ${f.shares.toFixed(2)} ${q.direction === 'below' ? 'NO' : 'YES'} @ ${avg.toFixed(4)} average incl. fee (from ${f.best} up to ${f.worst})`,
     warnings: [
       ...q.warnings.filter((w) => w !== ESTIMATE_WARNING),
       ...(short > 0.01 ? [`Only ${money(f.spent)} of your ${money(t.stake)} can be bought right now`] : []),

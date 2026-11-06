@@ -40,7 +40,7 @@ export default function Home() {
   const [updatedAt, setUpdatedAt] = useState<number | null>(null)
   const [attempt, setAttempt] = useState(0)
   const [picked, setPicked] = useState<VenueId | null>(null)
-  const { asset, level, date, stake, ready } = belief
+  const { asset, direction, level, date, stake, ready } = belief
   const spot = useSpot(asset)
 
   const incomplete = ready && (!(level > 0) || !(stake > 0) || !date)
@@ -60,19 +60,19 @@ export default function Home() {
 
   useEffect(() => {
     if (!ready || incomplete) return setLoading(false)
-    const key = `${asset}|${level}|${date}|${stake}|${attempt}`
+    const key = `${asset}|${direction}|${level}|${date}|${stake}|${attempt}`
     const background = shown.current === key
     // A new sentence marks the quotes stale at once, so nobody can bet on the previous numbers.
     if (!background) setLoading(true)
     const ctrl = new AbortController()
     const t = setTimeout(async () => {
       try {
-        const r = await fetch(`/api/quotes?${new URLSearchParams({ asset, level: String(level), date, stake: String(stake) })}`, { signal: ctrl.signal })
+        const r = await fetch(`/api/quotes?${new URLSearchParams({ asset, direction, level: String(level), date, stake: String(stake) })}`, { signal: ctrl.signal })
         if (!r.ok) throw new Error(String(r.status))
         const body: QuotesData = await r.json()
         const results = await refineAll(body.results, executors)
         if (ctrl.signal.aborted) return
-        setData(finalize(results, level, stake))
+        setData(finalize(results, level, stake, direction))
         shown.current = key
         setFailed(false)
         setUpdatedAt(Date.now())
@@ -87,7 +87,7 @@ export default function Home() {
       }
     }, background ? 0 : 400)
     return () => { clearTimeout(t); ctrl.abort() }
-  }, [asset, level, date, stake, ready, incomplete, attempt, tick])
+  }, [asset, direction, level, date, stake, ready, incomplete, attempt, tick])
 
   // The venue being bet on, while its quote still stands. Changing tabs drops it.
   const pickedQuote = data?.results.find((r): r is Quote => r.available && r.venue === picked) ?? null
@@ -135,6 +135,7 @@ export default function Home() {
               onRetry={() => setAttempt((n) => n + 1)}
               onTry={(patch) => belief.set(patch)}
               level={level}
+              direction={direction}
               spot={spot}
               asset={asset}
               onPick={pick}

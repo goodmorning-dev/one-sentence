@@ -305,7 +305,7 @@ async function open(wallet: WalletClient): Promise<VenueSession> {
         if (!(shares > 0)) return { ok: false, message: 'Nothing filled at this price; the book moved. No money was spent. Try again.' }
         return {
           ok: true,
-          message: `Bought ${shares} YES at ${Number(avgPx).toFixed(4)}`,
+          message: `Bought ${shares} ${q.direction === 'below' ? 'NO' : 'YES'} at ${Number(avgPx).toFixed(4)}`,
           filled: { spent: shares * Number(avgPx), payout: shares * (1 - CLOSE_FEE_RATE) },
           link: 'https://app.hyperliquid.xyz/portfolio',
         }

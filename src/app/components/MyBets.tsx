@@ -2,7 +2,7 @@
 
 import { Fragment, useState } from 'react'
 import type { Position, PositionStatus } from '@/lib/exec/types'
-import { day, shortTitle, signedUsd, usd } from '@/lib/format'
+import { betTitle, day, signedUsd, usd } from '@/lib/format'
 import { useWallet } from '@/lib/wallet'
 import type { Cash } from '@/lib/usePositions'
 import { VENUE_NAMES } from './Quotes'
@@ -241,7 +241,7 @@ function OpenTable({ bets, sell }: { bets: Position[]; sell: SellState }) {
               <tr className={`border-t border-chip ${claimable ? 'bg-win/[0.04]' : ''}`}>
                 <td className="py-[18px] pl-6 pr-3">
                   <span className="flex flex-col gap-1">
-                    <span className="font-medium">{shortTitle(p.title)}{p.outcome !== 'Yes' ? ` · ${p.outcome}` : ''}</span>
+                    <span className="font-medium">{betTitle(p)}</span>
                     <span className="text-[13px] text-faint">{claimable ? 'Ended' : 'Decided'} {day(p.ends).replace(',', '')}</span>
                   </span>
                 </td>
@@ -291,7 +291,7 @@ function ResolvedCard({ p }: { p: Position }) {
           <span className="text-[13px] text-faint">{VENUE_NAMES[p.venue]} · {day(p.ends).replace(',', '')}</span>
           <StatusChip status={p.status} />
         </span>
-        <span className="text-[15px] font-medium">{shortTitle(p.title)}</span>
+        <span className="text-[15px] font-medium">{betTitle(p)}</span>
         <span className={`text-xl font-semibold ${tone}`}>{signedUsd(p.pnl)}</span>
       </a>
     </li>
@@ -306,7 +306,7 @@ function OpenBet({ p, sell }: { p: Position; sell: SellState }) {
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 flex-col gap-1">
           <a href={p.link} target="_blank" rel="noreferrer" className="text-[15px] font-medium leading-[1.35] text-ink no-underline hover:text-win">
-            {shortTitle(p.title)}{p.outcome !== 'Yes' ? ` · ${p.outcome}` : ''}
+            {betTitle(p)}
           </a>
           <span className="text-[13px] text-faint">{VENUE_NAMES[p.venue]} · {claimable ? 'ended' : 'decided'} {day(p.ends).replace(',', '')}</span>
         </div>
@@ -341,7 +341,7 @@ function ResolvedBet({ p }: { p: Position }) {
   return (
     <li className="flex min-h-[60px] items-center justify-between gap-3 border-b border-raised px-1 py-2">
       <a href={p.link} target="_blank" rel="noreferrer" className="flex min-w-0 flex-col gap-0.5 no-underline">
-        <span className="text-sm text-ink">{shortTitle(p.title)}</span>
+        <span className="text-sm text-ink">{betTitle(p)}</span>
         <span className="text-xs text-faint">{VENUE_NAMES[p.venue]} · {usd(p.cost)} in · {day(p.ends).replace(',', '')}</span>
       </a>
       <span className="flex flex-col items-end gap-0.5 text-right">

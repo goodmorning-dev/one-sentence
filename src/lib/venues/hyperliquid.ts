@@ -26,6 +26,9 @@ const hlTime = (t: string) => new Date(`${t.slice(0, 4)}-${t.slice(4, 6)}-${t.sl
 // and builder-deployed "binaryPrice" outcomes with arbitrary strikes and times.
 async function quote(b: Belief): Promise<VenueResult> {
   const link = 'https://app.hyperliquid.xyz'
+  // "Above" buys YES (side 0); "below" buys NO (side 1), which pays when the price is not above the strike.
+  const below = b.direction === 'below'
+  const side = below ? 1 : 0
   const meta = await info<{ outcomes: Outcome[] }>({ type: 'outcomeMeta' })
   const ymd = b.date.replaceAll('-', '')
   const markets = meta.outcomes
@@ -50,8 +53,8 @@ async function quote(b: Belief): Promise<VenueResult> {
 
   if (!markets.length) return missed(`No ${b.asset} market that day`)
 
-  // Side 0 is YES; its spot coin is "#<10 × outcome + side>".
-  const books = await Promise.all(markets.map((m) => info<{ levels: [Level[], Level[]] }>({ type: 'l2Book', coin: `#${10 * m.id}` })))
+  // Each side trades as its own spot coin, "#<10 × outcome + side>".
+  const books = await Promise.all(markets.map((m) => info<{ levels: [Level[], Level[]] }>({ type: 'l2Book', coin: `#${10 * m.id + side}` })))
   const withBooks = markets.map((m, i) => {
     const [bids, asks] = books[i].levels
     const parsedAsks = asks.map((l) => ({ px: +l.px, sz: +l.sz }))
@@ -59,11 +62,11 @@ async function quote(b: Belief): Promise<VenueResult> {
     return { ...m, asks: parsedAsks, bid, live: parsedAsks.length > 0 && parsedAsks[0].px - bid <= MAX_SPREAD }
   })
 
-  const m = withBooks.find((x) => x.strike >= b.level)
-  if (!m) return missed(`No market at or above $${b.level.toLocaleString('en-US')} that day`)
+  const m = below ? withBooks.findLast((x) => x.strike <= b.level) : withBooks.find((x) => x.strike >= b.level)
+  if (!m) return missed(`No market at or ${b.direction} $${b.level.toLocaleString('en-US')} that day`)
   if (!m.live) return missed(`Nobody is trading the $${m.strike.toLocaleString('en-US')} market yet`)
 
-  // Walk the YES asks with the stake, in whole shares (outcome sizes are integers on the book).
+  // Walk the asks with the stake, in whole shares (outcome sizes are integers on the book).
   let left = b.stake
   let shares = 0
   let worst = ''
@@ -85,20 +88,21 @@ async function quote(b: Belief): Promise<VenueResult> {
   return {
     venue: 'hyperliquid',
     available: true,
+    direction: b.direction,
     actualLevel: m.strike,
     settles: m.settles.toISOString(),
     priceSource: m.source,
     cost: spent,
     payoutIfRight: shares * (1 - SETTLE_FEE_RATE),
     impliedChance: spent / shares,
-    how: `Buy ${shares.toFixed(2)} YES of outcome ${m.id}, avg ${(spent / shares).toFixed(4)}`,
+    how: `Buy ${shares.toFixed(2)} ${below ? 'NO' : 'YES'} of outcome ${m.id}, avg ${(spent / shares).toFixed(4)}`,
     link,
     warnings: [
       ...(left > 0.01 ? [`The book only absorbs $${spent.toFixed(2)} of the stake`] : []),
       ...(m.strike !== b.level ? [`Nearest strike is $${m.strike}`] : []),
       'No fee on opening, about 0.07% of the payout at settlement',
     ],
-    ticket: { venue: 'hyperliquid', asset: 100_000_000 + 10 * m.id, limitPx: worst, size: String(shares), depthChecked: true },
+    ticket: { venue: 'hyperliquid', asset: 100_000_000 + 10 * m.id + side, limitPx: worst, size: String(shares), depthChecked: true },
   }
 }
 

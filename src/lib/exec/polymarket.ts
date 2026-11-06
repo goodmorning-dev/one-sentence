@@ -111,7 +111,7 @@ async function open(wallet: WalletClient): Promise<VenueSession> {
       if (!(shares > 0)) return { ok: false, message: 'Nothing was bought at this price; the offers moved. No money was spent. Try again.' }
       return {
         ok: true,
-        message: `Bought ${shares.toFixed(2)} YES for $${spent.toFixed(2)}`,
+        message: `Bought ${shares.toFixed(2)} ${q.direction === 'below' ? 'NO' : 'YES'} for $${spent.toFixed(2)}`,
         filled: { spent, payout: shares },
         link: 'https://polymarket.com/portfolio',
       }
